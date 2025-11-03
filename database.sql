@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS messages (
     title VARCHAR(255) NOT NULL,
     content TEXT NOT NULL,
     delay_days INT NOT NULL DEFAULT 0,
+    file_url VARCHAR(500) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_active TINYINT(1) DEFAULT 1
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

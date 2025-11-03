@@ -1,5 +1,6 @@
 <?php
 require_once 'db.php';
+require_once 'helpers.php';
 
 // Cek login
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
@@ -16,19 +17,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $content = trim($_POST['content'] ?? '');
     $delay_days = intval($_POST['delay_days'] ?? 0);
     $is_active = isset($_POST['is_active']) ? 1 : 0;
+    $file_url = null;
     
     if (empty($title) || empty($content)) {
         $error = 'Title dan content tidak boleh kosong!';
     } else {
-        try {
-            $stmt = $pdo->prepare("INSERT INTO messages (title, content, delay_days, is_active) VALUES (?, ?, ?, ?)");
-            $stmt->execute([$title, $content, $delay_days, $is_active]);
-            $success = 'Pesan berhasil ditambahkan!';
+        // Handle file upload jika ada
+        if (isset($_FILES['media_file']) && $_FILES['media_file']['error'] !== UPLOAD_ERR_NO_FILE) {
+            $upload_result = upload_file($_FILES['media_file'], 'messages');
             
-            // Reset form
-            $_POST = [];
-        } catch (PDOException $e) {
-            $error = 'Error: ' . $e->getMessage();
+            if ($upload_result['success']) {
+                $file_url = $upload_result['path'];
+            } else {
+                $error = 'Error upload file: ' . $upload_result['message'];
+            }
+        }
+        
+        // Jika tidak ada error upload, simpan ke database
+        if (empty($error)) {
+            try {
+                $stmt = $pdo->prepare("INSERT INTO messages (title, content, delay_days, file_url, is_active) VALUES (?, ?, ?, ?, ?)");
+                $stmt->execute([$title, $content, $delay_days, $file_url, $is_active]);
+                $success = 'Pesan berhasil ditambahkan!';
+                
+                // Reset form
+                $_POST = [];
+            } catch (PDOException $e) {
+                // Jika gagal simpan ke database, hapus file yang sudah diupload
+                if ($file_url) {
+                    delete_file($file_url);
+                }
+                $error = 'Error: ' . $e->getMessage();
+            }
         }
     }
 }
@@ -64,7 +84,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
             <?php endif; ?>
             
-            <form method="POST" action="">
+            <form method="POST" action="" enctype="multipart/form-data">
                 <div class="form-group">
                     <label for="title">Judul Pesan <span class="required">*</span></label>
                     <input type="text" id="title" name="title" required 
@@ -75,7 +95,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <div class="form-group">
                     <label for="content">Isi Pesan <span class="required">*</span></label>
                     <textarea id="content" name="content" rows="6" required 
-                              placeholder="Masukkan isi pesan yang akan dikirim ke WhatsApp"><?php echo htmlspecialchars($_POST['content'] ?? ''); ?></textarea>
+                              placeholder="Masukkan isi pesan yang akan dikirim ke WhatsApp. Gunakan {nama} atau {name} untuk personalisasi."><?php echo htmlspecialchars($_POST['content'] ?? ''); ?></textarea>
+                    <small>💡 Tips: Gunakan <strong>{nama}</strong> atau <strong>{name}</strong> untuk menyapa subscriber secara personal</small>
+                </div>
+                
+                <div class="form-group">
+                    <label for="media_file">File Media (Opsional)</label>
+                    <input type="file" id="media_file" name="media_file" accept="image/*,video/*,.pdf">
+                    <small>📎 Upload gambar, video, atau PDF (maksimal 10MB). File akan dikirim bersama pesan teks.</small>
                 </div>
                 
                 <div class="form-group">
@@ -92,8 +119,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </label>
                 </div>
                 
-                <button type="submit" class="btn-primary">Simpan Pesan</button>
-                <a href="messages.php" class="btn-secondary">Batal</a>
+                <button type="submit" class="btn-primary">💾 Simpan Pesan</button>
+                <a href="messages.php" class="btn-secondary">❌ Batal</a>
             </form>
         </div>
     </div>

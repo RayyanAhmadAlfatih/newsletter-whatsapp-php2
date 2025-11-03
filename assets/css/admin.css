@@ -539,6 +539,81 @@ body::before {
     gap: 15px;
 }
 
+/* Pagination */
+.pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-top: 30px;
+    padding: 20px 0;
+    flex-wrap: wrap;
+}
+
+.page-link {
+    display: inline-block;
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.9);
+    color: #667eea;
+    text-decoration: none;
+    border-radius: 8px;
+    border: 2px solid #e1e8ed;
+    transition: all 0.3s ease;
+    font-weight: 500;
+    font-size: 0.9em;
+    min-width: 40px;
+    text-align: center;
+}
+
+.page-link:hover {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    border-color: #667eea;
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+}
+
+.page-link.active {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    border-color: #667eea;
+    font-weight: 700;
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+    pointer-events: none;
+}
+
+.page-dots {
+    color: #999;
+    font-weight: bold;
+    padding: 0 5px;
+}
+
+/* File input styling */
+.form-group input[type="file"] {
+    width: 100%;
+    padding: 12px 15px;
+    border: 2px dashed #e1e8ed;
+    border-radius: 12px;
+    font-size: 14px;
+    font-family: inherit;
+    transition: all 0.3s ease;
+    background: rgba(255, 255, 255, 0.8);
+    backdrop-filter: blur(10px);
+    cursor: pointer;
+}
+
+.form-group input[type="file"]:hover {
+    border-color: #764ba2;
+    background: rgba(255, 255, 255, 0.95);
+}
+
+.form-group input[type="file"]:focus {
+    outline: none;
+    border-color: #764ba2;
+    border-style: solid;
+    box-shadow: 0 0 0 3px rgba(118, 75, 162, 0.1);
+}
+
 @media (max-width: 768px) {
     .admin-header {
         padding: 20px 25px;

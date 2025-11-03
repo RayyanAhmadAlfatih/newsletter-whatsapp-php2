@@ -43,6 +43,7 @@ $messages = $stmt->fetchAll();
                         <th>ID</th>
                         <th>Judul</th>
                         <th>Isi Pesan</th>
+                        <th>Media</th>
                         <th>Jeda (Hari)</th>
                         <th>Status</th>
                         <th>Tanggal Dibuat</th>
@@ -52,7 +53,7 @@ $messages = $stmt->fetchAll();
                 <tbody>
                     <?php if (empty($messages)): ?>
                         <tr>
-                            <td colspan="6" class="text-center">Belum ada pesan</td>
+                            <td colspan="8" class="text-center">Belum ada pesan</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($messages as $msg): ?>
@@ -60,6 +61,24 @@ $messages = $stmt->fetchAll();
                                 <td><?php echo $msg['id']; ?></td>
                                 <td><?php echo htmlspecialchars($msg['title']); ?></td>
                                 <td><?php echo htmlspecialchars(mb_substr($msg['content'], 0, 50)) . '...'; ?></td>
+                                <td>
+                                    <?php if (!empty($msg['file_url'])): ?>
+                                        <?php
+                                        $ext = strtolower(pathinfo($msg['file_url'], PATHINFO_EXTENSION));
+                                        if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                                            echo '🖼️ Gambar';
+                                        } elseif (in_array($ext, ['mp4', 'avi', 'mpeg', 'mov'])) {
+                                            echo '🎥 Video';
+                                        } elseif ($ext === 'pdf') {
+                                            echo '📄 PDF';
+                                        } else {
+                                            echo '📎 File';
+                                        }
+                                        ?>
+                                    <?php else: ?>
+                                        -
+                                    <?php endif; ?>
+                                </td>
                                 <td><?php echo $msg['delay_days']; ?> hari</td>
                                 <td>
                                     <?php if ($msg['is_active']): ?>
@@ -70,8 +89,8 @@ $messages = $stmt->fetchAll();
                                 </td>
                                 <td><?php echo date('d/m/Y H:i', strtotime($msg['created_at'])); ?></td>
                                 <td>
-                                    <a class="btn-secondary" href="message_edit.php?id=<?php echo $msg['id']; ?>">Edit</a>
-                                    <a class="btn-secondary" href="message_delete.php?id=<?php echo $msg['id']; ?>" onclick="return confirm('Hapus pesan ini? Semua log terkait akan ikut terhapus.');">Hapus</a>
+                                    <a class="btn-secondary" href="message_edit.php?id=<?php echo $msg['id']; ?>">✏️ Edit</a>
+                                    <a class="btn-secondary" href="message_delete.php?id=<?php echo $msg['id']; ?>" onclick="return confirm('Hapus pesan ini? Semua log terkait akan ikut terhapus.');">🗑️ Hapus</a>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

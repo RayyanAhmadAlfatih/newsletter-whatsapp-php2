@@ -1,5 +1,6 @@
 <?php
 require_once 'db.php';
+require_once 'helpers.php';
 
 // Cek login
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
@@ -7,8 +8,19 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
     exit;
 }
 
-// Ambil semua subscribers
-$stmt = $pdo->query("SELECT * FROM subscribers ORDER BY created_at DESC");
+// Pagination
+$items_per_page = 20;
+$current_page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$offset = ($current_page - 1) * $items_per_page;
+
+// Hitung total subscribers
+$stmt = $pdo->query("SELECT COUNT(*) as total FROM subscribers");
+$total_subscribers = $stmt->fetch()['total'];
+$total_pages = ceil($total_subscribers / $items_per_page);
+
+// Ambil subscribers dengan pagination
+$stmt = $pdo->prepare("SELECT * FROM subscribers ORDER BY created_at DESC LIMIT ? OFFSET ?");
+$stmt->execute([$items_per_page, $offset]);
 $subscribers = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>
@@ -34,7 +46,7 @@ $subscribers = $stmt->fetchAll();
 
     <div class="admin-container">
         <div class="content-section">
-            <p><strong>Total:</strong> <?php echo count($subscribers); ?> subscribers</p>
+            <p><strong>Total:</strong> <?php echo $total_subscribers; ?> subscribers | Halaman <?php echo $current_page; ?> dari <?php echo $total_pages; ?></p>
             
             <table class="data-table">
                 <thead>
@@ -64,6 +76,8 @@ $subscribers = $stmt->fetchAll();
                     <?php endif; ?>
                 </tbody>
             </table>
+            
+            <?php echo generate_pagination($current_page, $total_pages, '?'); ?>
         </div>
     </div>
 </body>
