@@ -1,5 +1,6 @@
 <?php
 require_once 'admin/db.php';
+require_once 'admin/helpers.php';
 
 // Cek jika form sudah di-submit
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -15,16 +16,18 @@ $phone = trim($_POST['phone'] ?? '');
 // Validasi
 $errors = [];
 
-if (empty($name)) {
-    $errors[] = "Nama tidak boleh kosong";
+if (empty($name) || strlen($name) < 3) {
+    $errors[] = "Nama tidak boleh kosong (minimal 3 karakter)";
 }
 
 if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
     $errors[] = "Email tidak valid";
 }
 
-if (empty($phone) || !preg_match('/^[0-9]{10,13}$/', $phone)) {
-    $errors[] = "Nomor WhatsApp harus 10-13 digit angka";
+// Validasi nomor WhatsApp dengan helper
+$validated_phone = validate_whatsapp_number($phone);
+if (!$validated_phone) {
+    $errors[] = "Nomor WhatsApp tidak valid. Gunakan format 08xx atau 628xx";
 }
 
 // Jika ada error, redirect kembali
@@ -34,8 +37,8 @@ if (!empty($errors)) {
     exit;
 }
 
-// Normalisasi nomor telepon (hilangkan spasi dan karakter khusus)
-$phone = preg_replace('/[^0-9]/', '', $phone);
+// Gunakan nomor yang sudah divalidasi dan dinormalisasi
+$phone = $validated_phone;
 
 try {
     // Cek apakah email atau phone sudah terdaftar
@@ -68,7 +71,7 @@ try {
     
     // Auto-kirim pesan dengan delay 0 hari (hari pertama)
     $stmt = $pdo->prepare("
-        SELECT ml.id as log_id, ml.subscriber_id, ml.message_id, s.phone, s.name as subscriber_name, m.content
+        SELECT ml.id as log_id, ml.subscriber_id, ml.message_id, s.phone, s.name as subscriber_name, m.content, m.file_url
         FROM message_logs ml
         JOIN subscribers s ON ml.subscriber_id = s.id
         JOIN messages m ON ml.message_id = m.id
@@ -81,7 +84,23 @@ try {
         // Helper: kirim pesan via Fonnte
         foreach ($messagesToSend as $msg) {
             $content = str_replace(['{nama}', '{name}'], $msg['subscriber_name'], $msg['content']);
-            $phoneWA = preg_replace('/^0/', '62', $msg['phone']);
+            $phoneWA = normalize_phone($msg['phone']);
+            
+            // Build post fields
+            $postfields = [
+                'target' => $phoneWA,
+                'message' => $content,
+                'countryCode' => '62'
+            ];
+            
+            // Tambahkan URL media jika ada
+            if (!empty($msg['file_url'])) {
+                $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                $baseUrl = $protocol . '://' . $host;
+                $fileUrl = rtrim($baseUrl, '/') . '/' . ltrim($msg['file_url'], '/');
+                $postfields['url'] = $fileUrl;
+            }
             
             $ch = curl_init();
             curl_setopt_array($ch, [
@@ -93,7 +112,7 @@ try {
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
                 CURLOPT_CUSTOMREQUEST => 'POST',
-                CURLOPT_POSTFIELDS => ['target' => $phoneWA, 'message' => $content, 'countryCode' => '62'],
+                CURLOPT_POSTFIELDS => $postfields,
                 CURLOPT_HTTPHEADER => ['Authorization: ' . FONNTE_API_KEY],
             ]);
             $response = curl_exec($ch);
@@ -102,14 +121,22 @@ try {
             
             // Update log
             $result = json_decode($response, true);
-            $isSuccess = ($httpCode === 200) && isset($result['status']) && (
-                $result['status'] === 'success' || $result['status'] === true
+            $statusFlag = null;
+            if (is_array($result)) {
+                if (isset($result['status'])) { $statusFlag = $result['status']; }
+                elseif (isset($result['message'])) { $statusFlag = $result['message']; }
+            }
+            
+            $isSuccess = ($httpCode === 200) && (
+                $statusFlag === 'success' || $statusFlag === true || $statusFlag === 'ok'
             );
+            
+            $errorMsg = $isSuccess ? null : (is_array($result) ? json_encode($result) : 'HTTP ' . $httpCode);
             
             $stmtUpd = $pdo->prepare("UPDATE message_logs SET status = ?, sent_at = NOW(), error_message = ? WHERE id = ?");
             $stmtUpd->execute([
                 $isSuccess ? 'sent' : 'failed',
-                $isSuccess ? null : ('HTTP ' . $httpCode),
+                $errorMsg,
                 $msg['log_id']
             ]);
             

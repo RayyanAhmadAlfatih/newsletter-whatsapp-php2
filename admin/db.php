@@ -21,6 +21,10 @@ try {
 define('FONNTE_API_KEY', 'q614EBFZ!GK@7-td!LdE'); // Ganti dengan API key Fonnte Anda
 define('FONNTE_API_URL', 'https://api.fonnte.com/send');
 
+// Base URL (untuk cron job dan media URL)
+// Ganti dengan domain Anda jika menggunakan cron job
+define('BASE_URL', 'http://localhost');
+
 // Konfigurasi Admin
 define('ADMIN_USERNAME', 'admin');
 define('ADMIN_PASSWORD', 'admin123'); // Ganti dengan password yang aman

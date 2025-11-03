@@ -1,14 +1,19 @@
-# Newsletter WhatsApp - Sistem Drip Campaign
+# Newsletter WhatsApp v2 - Sistem Drip Campaign
 
 Sistem newsletter sederhana untuk mengirim pesan otomatis via WhatsApp menggunakan Fonnte API. Dibangun dengan PHP, MySQL, HTML, CSS, dan JavaScript.
 
-## Fitur
+## ✨ Fitur v2 (Latest)
 
 1. **Form Pendaftaran** - Halaman utama dengan form pendaftaran subscriber
 2. **Admin Dashboard** - Panel admin untuk mengelola sistem
 3. **Manajemen Pesan** - Tambah dan kelola pesan otomatis
 4. **Sistem Otomatisasi** - Pengiriman pesan otomatis berdasarkan jeda hari
 5. **Log Pengiriman** - Tracking status pengiriman pesan
+6. **📎 Upload Media** - Kirim gambar, video, atau PDF bersama pesan teks via Fonnte
+7. **✅ Validasi Input** - Validasi nomor WhatsApp, email, dan XSS protection
+8. **📄 Pagination** - Navigasi halaman untuk subscribers dan logs
+9. **🔒 Security** - Upload file validation, MIME type checking, dan file size limit
+10. **🎨 UI/UX Improvements** - Feedback visual yang lebih baik dan navigasi yang user-friendly
 
 ## Struktur Folder
 
@@ -180,6 +185,7 @@ Atau untuk Windows (Task Scheduler):
 - `title` - Judul pesan
 - `content` - Isi pesan
 - `delay_days` - Jeda hari setelah pendaftaran
+- `file_url` - Path file media (gambar/video/pdf) - **NEW in v2**
 - `is_active` - Status aktif/nonaktif
 - `created_at` - Timestamp pembuatan
 
@@ -199,6 +205,9 @@ Atau untuk Windows (Task Scheduler):
 3. **File Permissions**: Set permission yang tepat untuk file konfigurasi
 4. **HTTPS**: Gunakan HTTPS untuk produksi
 5. **API Key**: Jangan expose API key Fonnte Anda
+6. **Upload Security**: File upload sudah divalidasi MIME type, ukuran (max 10MB), dan ekstensi
+7. **XSS Protection**: Semua input divalidasi dan di-escape sebelum ditampilkan
+8. **SQL Injection**: Menggunakan prepared statements untuk semua query database
 
 ## Troubleshooting
 
@@ -226,9 +235,52 @@ Untuk pertanyaan atau bantuan, silakan buat issue di repository ini.
 
 MIT License - Bebas digunakan untuk keperluan pribadi atau komersial.
 
+## Changelog v2
+
+### 🆕 Fitur Baru
+- Upload dan kirim media (gambar, video, PDF) via Fonnte API
+- Validasi nomor WhatsApp format Indonesia (08xx, 628xx)
+- Pagination untuk halaman subscribers dan logs (20 item per halaman)
+- Helper functions untuk validasi, sanitasi, dan utilitas umum
+- Improved error handling dan logging
+
+### 🔒 Security Enhancements
+- Validasi file upload (MIME type, size, extension)
+- XSS protection dengan htmlspecialchars
+- SQL Injection prevention dengan prepared statements
+- File upload folder protection (.htaccess)
+
+### 🎨 UI/UX Improvements
+- Pagination styling dengan hover effects
+- File input styling
+- Better form feedback dengan emoji icons
+- Media file preview di edit form
+- Improved table layouts
+
+### 📁 New Files
+- `admin/helpers.php` - Helper functions
+- `uploads/` - Folder untuk menyimpan media files
+- `migration_add_file_url.sql` - Migration untuk update schema
+- `CRON_SETUP.md` - Dokumentasi setup cron job
+- `.gitignore` - Git ignore file
+
+## Migrasi dari v1 ke v2
+
+Jika Anda sudah menggunakan versi sebelumnya, jalankan migration:
+
+```bash
+mysql -u root -p newsletter_wa < migration_add_file_url.sql
+```
+
+Atau via phpMyAdmin:
+```sql
+ALTER TABLE messages ADD COLUMN file_url VARCHAR(500) NULL AFTER delay_days;
+```
+
 ## Catatan
 
 - Sistem ini menggunakan Fonnte API untuk pengiriman WhatsApp
 - Pastikan Anda memahami terms of service Fonnte sebelum menggunakan di produksi
 - Sistem ini dirancang sederhana, untuk kebutuhan yang lebih kompleks disarankan menggunakan framework modern
+- Untuk mengirim media, pastikan file dapat diakses via HTTP/HTTPS (Fonnte akan download dari URL yang diberikan)
 

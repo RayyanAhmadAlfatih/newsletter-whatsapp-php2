@@ -1,0 +1,46 @@
+# Uploads folder (user generated content)
+uploads/*
+!uploads/.htaccess
+!uploads/index.php
+
+# Database config (if separated)
+config.php
+db_config.php
+
+# Environment files
+.env
+.env.local
+
+# IDE files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.log
+*.swp
+*.swo
+*~
+
+# Zip archives
+*.zip
+*.tar
+*.tar.gz
+*.rar
+
+# PHPMyAdmin
+phpmyadmin/
+
+# Node modules (if using any build tools)
+node_modules/
+
+# Composer
+vendor/
+composer.lock

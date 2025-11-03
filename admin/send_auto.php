@@ -10,8 +10,9 @@ if (php_sapi_name() !== 'cli' && (!isset($_SESSION['admin_logged_in']) || $_SESS
 
 /**
  * Fungsi untuk mengirim pesan WhatsApp via Fonnte API
+ * Support teks + media (gambar, video, pdf)
  */
-function sendWhatsAppMessage($phone, $message, $apiKey) {
+function sendWhatsAppMessage($phone, $message, $apiKey, $fileUrl = null) {
     $url = FONNTE_API_URL;
     // Fonnte expects multipart form fields, not raw JSON
     $postfields = [
@@ -19,6 +20,27 @@ function sendWhatsAppMessage($phone, $message, $apiKey) {
         'message' => $message,
         'countryCode' => '62', // optional, keep consistent
     ];
+    
+    // Jika ada file media, tambahkan URL-nya
+    if (!empty($fileUrl)) {
+        // Konversi relative path ke absolute URL
+        if (!preg_match('/^https?:\/\//', $fileUrl)) {
+            // Get base URL dari server
+            $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+            $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+            $baseUrl = $protocol . '://' . $host;
+            
+            // Jika dijalankan via CLI (cron), gunakan config manual atau skip URL conversion
+            if (php_sapi_name() === 'cli') {
+                // Anda bisa set BASE_URL di db.php atau skip jika file sudah absolute
+                $baseUrl = defined('BASE_URL') ? BASE_URL : 'http://localhost';
+            }
+            
+            $fileUrl = rtrim($baseUrl, '/') . '/' . ltrim($fileUrl, '/');
+        }
+        
+        $postfields['url'] = $fileUrl;
+    }
 
     $ch = curl_init();
     curl_setopt_array($ch, [
@@ -68,7 +90,7 @@ function sendWhatsAppMessage($phone, $message, $apiKey) {
 // Ambil semua log dengan status pending
 $stmt = $pdo->query("
     SELECT ml.*, s.phone, s.name as subscriber_name, s.created_at as subscriber_created_at,
-           m.content, m.title, m.delay_days
+           m.content, m.title, m.delay_days, m.file_url
     FROM message_logs ml
     JOIN subscribers s ON ml.subscriber_id = s.id
     JOIN messages m ON ml.message_id = m.id
@@ -127,7 +149,8 @@ foreach ($pendingLogs as $log) {
         $log['content']
     );
     
-    $sendResult = sendWhatsAppMessage($phone, $messageContent, FONNTE_API_KEY);
+    // Kirim pesan dengan media jika ada
+    $sendResult = sendWhatsAppMessage($phone, $messageContent, FONNTE_API_KEY, $log['file_url']);
     
     // Update log
     if ($sendResult['success']) {

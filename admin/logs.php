@@ -1,5 +1,6 @@
 <?php
 require_once 'db.php';
+require_once 'helpers.php';
 
 // Cek login
 if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
@@ -10,7 +11,28 @@ if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== tru
 // Filter status
 $status_filter = $_GET['status'] ?? 'all';
 
-// Query logs dengan join
+// Pagination
+$items_per_page = 50;
+$current_page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$offset = ($current_page - 1) * $items_per_page;
+
+// Hitung total logs
+$count_sql = "SELECT COUNT(*) as total FROM message_logs ml 
+              JOIN subscribers s ON ml.subscriber_id = s.id
+              JOIN messages m ON ml.message_id = m.id";
+
+if ($status_filter !== 'all') {
+    $count_sql .= " WHERE ml.status = ?";
+    $stmt = $pdo->prepare($count_sql);
+    $stmt->execute([$status_filter]);
+} else {
+    $stmt = $pdo->query($count_sql);
+}
+
+$total_logs = $stmt->fetch()['total'];
+$total_pages = ceil($total_logs / $items_per_page);
+
+// Query logs dengan join dan pagination
 $sql = "SELECT ml.*, s.name as subscriber_name, s.phone, m.title as message_title 
         FROM message_logs ml
         JOIN subscribers s ON ml.subscriber_id = s.id
@@ -18,10 +40,16 @@ $sql = "SELECT ml.*, s.name as subscriber_name, s.phone, m.title as message_titl
 
 if ($status_filter !== 'all') {
     $sql .= " WHERE ml.status = ?";
+}
+
+$sql .= " ORDER BY ml.id DESC LIMIT ? OFFSET ?";
+
+if ($status_filter !== 'all') {
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([$status_filter]);
+    $stmt->execute([$status_filter, $items_per_page, $offset]);
 } else {
-    $stmt = $pdo->query($sql);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$items_per_page, $offset]);
 }
 
 $logs = $stmt->fetchAll();
@@ -57,7 +85,7 @@ $logs = $stmt->fetchAll();
                 <a href="?status=failed" class="filter-btn <?php echo $status_filter === 'failed' ? 'active' : ''; ?>">Gagal</a>
             </div>
             
-            <p><strong>Total:</strong> <?php echo count($logs); ?> log</p>
+            <p><strong>Total:</strong> <?php echo $total_logs; ?> log | Halaman <?php echo $current_page; ?> dari <?php echo $total_pages; ?></p>
             
             <table class="data-table">
                 <thead>
@@ -103,6 +131,11 @@ $logs = $stmt->fetchAll();
                     <?php endif; ?>
                 </tbody>
             </table>
+            
+            <?php 
+            $base_url = '?status=' . urlencode($status_filter);
+            echo generate_pagination($current_page, $total_pages, $base_url); 
+            ?>
         </div>
     </div>
 </body>
