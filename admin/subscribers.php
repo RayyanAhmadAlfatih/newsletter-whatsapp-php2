@@ -19,8 +19,10 @@ $total_subscribers = $stmt->fetch()['total'];
 $total_pages = ceil($total_subscribers / $items_per_page);
 
 // Ambil subscribers dengan pagination
-$stmt = $pdo->prepare("SELECT * FROM subscribers ORDER BY created_at DESC LIMIT ? OFFSET ?");
-$stmt->execute([$items_per_page, $offset]);
+$stmt = $pdo->prepare("SELECT * FROM subscribers ORDER BY created_at DESC LIMIT :limit OFFSET :offset");
+$stmt->bindValue(':limit', (int) $items_per_page, PDO::PARAM_INT);
+$stmt->bindValue(':offset', (int) $offset, PDO::PARAM_INT);
+$stmt->execute();
 $subscribers = $stmt->fetchAll();
 ?>
 <!DOCTYPE html>

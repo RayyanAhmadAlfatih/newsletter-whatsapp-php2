@@ -22,9 +22,10 @@ $count_sql = "SELECT COUNT(*) as total FROM message_logs ml
               JOIN messages m ON ml.message_id = m.id";
 
 if ($status_filter !== 'all') {
-    $count_sql .= " WHERE ml.status = ?";
+    $count_sql .= " WHERE ml.status = :status";
     $stmt = $pdo->prepare($count_sql);
-    $stmt->execute([$status_filter]);
+    $stmt->bindValue(':status', $status_filter, PDO::PARAM_STR);
+    $stmt->execute();
 } else {
     $stmt = $pdo->query($count_sql);
 }
@@ -39,18 +40,20 @@ $sql = "SELECT ml.*, s.name as subscriber_name, s.phone, m.title as message_titl
         JOIN messages m ON ml.message_id = m.id";
 
 if ($status_filter !== 'all') {
-    $sql .= " WHERE ml.status = ?";
+    $sql .= " WHERE ml.status = :status";
 }
 
-$sql .= " ORDER BY ml.id DESC LIMIT ? OFFSET ?";
+$sql .= " ORDER BY ml.id DESC LIMIT :limit OFFSET :offset";
+
+$stmt = $pdo->prepare($sql);
 
 if ($status_filter !== 'all') {
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([$status_filter, $items_per_page, $offset]);
-} else {
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([$items_per_page, $offset]);
+    $stmt->bindValue(':status', $status_filter, PDO::PARAM_STR);
 }
+
+$stmt->bindValue(':limit', (int) $items_per_page, PDO::PARAM_INT);
+$stmt->bindValue(':offset', (int) $offset, PDO::PARAM_INT);
+$stmt->execute();
 
 $logs = $stmt->fetchAll();
 ?>
