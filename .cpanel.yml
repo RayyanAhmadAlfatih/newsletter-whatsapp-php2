@@ -1,0 +1,9 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home/edubisne/public_html/kingofcoding.my.id/newsletterwhatsappphp
+    - /bin/rsync -av --delete \
+        --exclude 'newsletter.zip' \
+        --exclude 'database.sql' \
+        --exclude '.htaccess' \
+        ./ $DEPLOYPATH/
