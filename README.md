@@ -71,23 +71,24 @@ Atau melalui phpMyAdmin:
 
 ### 3. Konfigurasi
 
-Edit file `admin/db.php`:
+Salin file contoh konfigurasi dan sesuaikan nilainya:
 
-```php
-// Konfigurasi Database
-define('DB_HOST', 'localhost');      // Host database
-define('DB_NAME', 'newsletter_wa');   // Nama database
-define('DB_USER', 'root');            // Username database
-define('DB_PASS', '');                // Password database
-
-// Konfigurasi Fonnte API
-define('FONNTE_API_KEY', 'YOUR_FONNTE_API_KEY'); // Ganti dengan API key Fonnte Anda
-define('FONNTE_API_URL', 'https://api.fonnte.com/send');
-
-// Konfigurasi Admin
-define('ADMIN_USERNAME', 'admin');    // Username admin
-define('ADMIN_PASSWORD', 'admin123'); // Password admin (GANTI dengan password yang aman!)
+```bash
+cp config.example.php config.php
 ```
+
+Atau buat file `.env` di root project. Nilai yang dapat dikonfigurasi:
+
+- `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`
+- `BASE_URL`
+- `FONNTE_API_KEY`, `FONNTE_API_URL`
+- `ADMIN_USERNAME`
+- `ADMIN_PASSWORD_HASH` (disarankan) atau `ADMIN_PASSWORD` (fallback)
+
+> 💡 **Tips:** Buat hash password admin dengan perintah:
+> `php -r "echo password_hash('password-anda', PASSWORD_DEFAULT), PHP_EOL;"`
+
+File `config.php` dan `.env` sudah masuk `.gitignore`, jadi aman untuk menyimpan kredensial dan API key.
 
 ### 4. Setup Web Server
 
@@ -101,7 +102,7 @@ Konfigurasi dasar sudah cukup untuk menjalankan aplikasi ini.
 
 1. Daftar akun di [Fonnte.com](https://fonnte.com)
 2. Dapatkan API Key dari dashboard Fonnte
-3. Masukkan API Key ke file `admin/db.php`
+3. Masukkan API Key ke `config.php` atau `.env` dengan kunci `FONNTE_API_KEY`
 
 ## Penggunaan
 
@@ -200,7 +201,7 @@ Atau untuk Windows (Task Scheduler):
 
 ## Keamanan
 
-1. **Ganti Password Admin**: Ubah `ADMIN_PASSWORD` di `admin/db.php` dengan password yang kuat
+1. **Ganti Password Admin**: Atur `ADMIN_USERNAME` dan `ADMIN_PASSWORD_HASH` di `config.php` atau `.env` dengan nilai yang kuat (gunakan `password_hash`)
 2. **Database**: Gunakan password yang kuat untuk database
 3. **File Permissions**: Set permission yang tepat untuk file konfigurasi
 4. **HTTPS**: Gunakan HTTPS untuk produksi
@@ -213,7 +214,7 @@ Atau untuk Windows (Task Scheduler):
 
 ### Koneksi Database Gagal
 - Pastikan MySQL service berjalan
-- Periksa konfigurasi di `admin/db.php`
+- Periksa konfigurasi di `config.php` atau `.env`
 - Pastikan database sudah dibuat
 
 ### Pesan Tidak Terkirim

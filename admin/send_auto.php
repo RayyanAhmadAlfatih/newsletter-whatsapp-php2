@@ -105,8 +105,18 @@ $results = [
     'sent' => 0,
     'failed' => 0,
     'skipped' => 0,
-    'details' => []
+    'details' => [],
+    'message' => null,
 ];
+
+$missingApiKey = empty(FONNTE_API_KEY);
+$missingApiKeyMessage = 'Fonnte API key belum dikonfigurasi';
+$missingApiKeyStmt = null;
+if ($missingApiKey) {
+    $missingApiKeyStmt = $pdo->prepare(
+        "UPDATE message_logs SET status = 'failed', error_message = ? WHERE id = ?"
+    );
+}
 
 foreach ($pendingLogs as $log) {
     $results['processed']++;
@@ -129,6 +139,19 @@ foreach ($pendingLogs as $log) {
             'message' => $log['title'],
             'status' => 'skipped',
             'reason' => 'Belum waktunya (target: ' . $targetDate->format('Y-m-d') . ')'
+        ];
+        continue;
+    }
+
+    if ($missingApiKey && $missingApiKeyStmt) {
+        $missingApiKeyStmt->execute([$missingApiKeyMessage, $log['id']]);
+        $results['failed']++;
+        $results['details'][] = [
+            'subscriber' => $log['subscriber_name'],
+            'phone' => $log['phone'],
+            'message' => $log['title'],
+            'status' => 'failed',
+            'error' => $missingApiKeyMessage
         ];
         continue;
     }
@@ -198,9 +221,16 @@ foreach ($pendingLogs as $log) {
     usleep(500000); // 0.5 detik
 }
 
+if ($missingApiKey) {
+    $results['message'] = $missingApiKeyMessage;
+}
+
 // Output hasil (untuk browser atau CLI)
 if (php_sapi_name() === 'cli') {
     // CLI mode (untuk cron job)
+    if (!empty($results['message'])) {
+        echo $results['message'] . "\n";
+    }
     echo "Pengiriman selesai:\n";
     echo "- Diproses: {$results['processed']}\n";
     echo "- Terkirim: {$results['sent']}\n";

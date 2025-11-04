@@ -142,7 +142,7 @@ CHANGELOG.md               # This file
    mkdir -p uploads/messages
    chmod 755 uploads
    ```
-3. Update `BASE_URL` in `admin/db.php` for production
+3. Update `BASE_URL` di `config.php` atau `.env` untuk produksi
 4. Verify `.htaccess` is working in uploads folder
 5. Test file upload functionality
 6. Setup cron job if needed (see CRON_SETUP.md)

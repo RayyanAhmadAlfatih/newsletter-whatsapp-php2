@@ -81,66 +81,74 @@ try {
     $messagesToSend = $stmt->fetchAll();
 
     if (!empty($messagesToSend)) {
-        // Helper: kirim pesan via Fonnte
-        foreach ($messagesToSend as $msg) {
-            $content = str_replace(['{nama}', '{name}'], $msg['subscriber_name'], $msg['content']);
-            $phoneWA = normalize_phone($msg['phone']);
-            
-            // Build post fields
-            $postfields = [
-                'target' => $phoneWA,
-                'message' => $content,
-                'countryCode' => '62'
-            ];
-            
-            // Tambahkan URL media jika ada
-            if (!empty($msg['file_url'])) {
-                $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-                $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
-                $baseUrl = $protocol . '://' . $host;
-                $fileUrl = rtrim($baseUrl, '/') . '/' . ltrim($msg['file_url'], '/');
-                $postfields['url'] = $fileUrl;
+        $fonnteApiKey = defined('FONNTE_API_KEY') ? FONNTE_API_KEY : '';
+        if (empty($fonnteApiKey)) {
+            $missingKeyMessage = 'Fonnte API key belum dikonfigurasi';
+            $stmtUpd = $pdo->prepare("UPDATE message_logs SET status = 'failed', error_message = ? WHERE id = ?");
+            foreach ($messagesToSend as $msg) {
+                $stmtUpd->execute([$missingKeyMessage, $msg['log_id']]);
             }
-            
-            $ch = curl_init();
-            curl_setopt_array($ch, [
-                CURLOPT_URL => 'https://api.fonnte.com/send',
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_ENCODING => '',
-                CURLOPT_MAXREDIRS => 10,
-                CURLOPT_TIMEOUT => 0,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-                CURLOPT_CUSTOMREQUEST => 'POST',
-                CURLOPT_POSTFIELDS => $postfields,
-                CURLOPT_HTTPHEADER => ['Authorization: ' . FONNTE_API_KEY],
-            ]);
-            $response = curl_exec($ch);
-            $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-            
-            // Update log
-            $result = json_decode($response, true);
-            $statusFlag = null;
-            if (is_array($result)) {
-                if (isset($result['status'])) { $statusFlag = $result['status']; }
-                elseif (isset($result['message'])) { $statusFlag = $result['message']; }
-            }
-            
-            $isSuccess = ($httpCode === 200) && (
-                $statusFlag === 'success' || $statusFlag === true || $statusFlag === 'ok'
-            );
-            
-            $errorMsg = $isSuccess ? null : (is_array($result) ? json_encode($result) : 'HTTP ' . $httpCode);
-            
+        } else {
             $stmtUpd = $pdo->prepare("UPDATE message_logs SET status = ?, sent_at = NOW(), error_message = ? WHERE id = ?");
-            $stmtUpd->execute([
-                $isSuccess ? 'sent' : 'failed',
-                $errorMsg,
-                $msg['log_id']
-            ]);
-            
-            usleep(200000); // 0.2s delay antar pesan
+            foreach ($messagesToSend as $msg) {
+                $content = str_replace(['{nama}', '{name}'], $msg['subscriber_name'], $msg['content']);
+                $phoneWA = normalize_phone($msg['phone']);
+                
+                // Build post fields
+                $postfields = [
+                    'target' => $phoneWA,
+                    'message' => $content,
+                    'countryCode' => '62'
+                ];
+                
+                // Tambahkan URL media jika ada
+                if (!empty($msg['file_url'])) {
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                    $baseUrl = $protocol . '://' . $host;
+                    $fileUrl = rtrim($baseUrl, '/') . '/' . ltrim($msg['file_url'], '/');
+                    $postfields['url'] = $fileUrl;
+                }
+                
+                $ch = curl_init();
+                curl_setopt_array($ch, [
+                    CURLOPT_URL => FONNTE_API_URL,
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_ENCODING => '',
+                    CURLOPT_MAXREDIRS => 10,
+                    CURLOPT_TIMEOUT => 0,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+                    CURLOPT_CUSTOMREQUEST => 'POST',
+                    CURLOPT_POSTFIELDS => $postfields,
+                    CURLOPT_HTTPHEADER => ['Authorization: ' . $fonnteApiKey],
+                ]);
+                $response = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                
+                // Update log
+                $result = json_decode($response, true);
+                $statusFlag = null;
+                if (is_array($result)) {
+                    if (isset($result['status'])) { $statusFlag = $result['status']; }
+                    elseif (isset($result['message'])) { $statusFlag = $result['message']; }
+                }
+                
+                $isSuccess = ($httpCode === 200) && (
+                    $statusFlag === 'success' || $statusFlag === true || $statusFlag === 'ok'
+                );
+                
+                $errorMsg = $isSuccess ? null : (is_array($result) ? json_encode($result) : 'HTTP ' . $httpCode);
+                
+                $stmtUpd->execute([
+                    $isSuccess ? 'sent' : 'failed',
+                    $errorMsg,
+                    $msg['log_id']
+                ]);
+                
+                usleep(200000); // 0.2s delay antar pesan
+            }
         }
     }
     

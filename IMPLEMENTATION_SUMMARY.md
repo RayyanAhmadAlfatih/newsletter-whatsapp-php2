@@ -182,7 +182,7 @@ For existing v1 installations:
    - Add new helper files
 
 5. **Configure**
-   - Update `BASE_URL` in `admin/db.php`
+   - Update `BASE_URL` di `config.php` atau `.env`
    - Verify folder permissions
 
 6. **Test**
@@ -194,7 +194,7 @@ For existing v1 installations:
 ## 🚀 Deployment Checklist
 
 ### Production Setup
-- [ ] Update database credentials in `admin/db.php`
+- [ ] Update database credentials in `config.php` atau `.env`
 - [ ] Change admin password to strong password
 - [ ] Update Fonnte API key
 - [ ] Set correct `BASE_URL` for your domain
