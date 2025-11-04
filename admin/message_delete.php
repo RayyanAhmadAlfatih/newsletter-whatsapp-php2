@@ -1,30 +1,44 @@
 <?php
-require_once 'db.php';
+declare(strict_types=1);
 
-// Cek login
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    header('Location: index.php');
+require_once 'db.php';
+require_once 'helpers.php';
+
+require_admin_auth();
+
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    header('Location: messages.php');
     exit;
 }
 
-$id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+$id = isset($_POST['id']) ? (int) $_POST['id'] : 0;
 if ($id <= 0) {
+    $_SESSION['error'] = 'Permintaan tidak valid.';
+    header('Location: messages.php');
+    exit;
+}
+
+if (!verify_csrf_token($_POST['csrf_token'] ?? null, 'delete_message_' . $id)) {
+    log_security_event('CSRF tidak valid saat menghapus pesan ID ' . $id . ' dari IP ' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+    $_SESSION['error'] = 'Permintaan tidak valid atau kedaluwarsa.';
     header('Location: messages.php');
     exit;
 }
 
 try {
-    // Hapus message_logs terkait (akan ikut terhapus kalau foreign key ON DELETE CASCADE aktif)
     $pdo->beginTransaction();
-    $stmt = $pdo->prepare('DELETE FROM messages WHERE id = ?');
-    $stmt->execute([$id]);
+    $deleteStmt = $pdo->prepare('DELETE FROM messages WHERE id = :id');
+    $deleteStmt->bindValue(':id', $id, PDO::PARAM_INT);
+    $deleteStmt->execute();
     $pdo->commit();
-} catch (PDOException $e) {
-    if ($pdo->inTransaction()) { $pdo->rollBack(); }
-    $_SESSION['error'] = 'Gagal menghapus: ' . $e->getMessage();
+    $_SESSION['success'] = 'Pesan berhasil dihapus.';
+} catch (PDOException $exception) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    log_security_event('Gagal menghapus pesan ID ' . $id . ': ' . $exception->getMessage());
+    $_SESSION['error'] = 'Gagal menghapus pesan.';
 }
 
 header('Location: messages.php');
 exit;
-
-

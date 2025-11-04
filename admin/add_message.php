@@ -1,57 +1,71 @@
 <?php
+declare(strict_types=1);
+
 require_once 'db.php';
 require_once 'helpers.php';
 
-// Cek login
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    header('Location: index.php');
-    exit;
-}
+require_admin_auth();
 
 $success = '';
 $error = '';
+$formSubmitted = $_SERVER['REQUEST_METHOD'] === 'POST';
+$resetForm = false;
+$logoutToken = csrf_token('logout');
+$formToken = csrf_token('add_message');
 
-// Proses tambah pesan
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $title = trim($_POST['title'] ?? '');
-    $content = trim($_POST['content'] ?? '');
-    $delay_days = intval($_POST['delay_days'] ?? 0);
-    $is_active = isset($_POST['is_active']) ? 1 : 0;
-    $file_url = null;
-    
-    if (empty($title) || empty($content)) {
-        $error = 'Title dan content tidak boleh kosong!';
+if ($formSubmitted) {
+    if (!verify_csrf_token($_POST['csrf_token'] ?? null, 'add_message')) {
+        $error = 'Sesi formulir tidak valid. Silakan refresh halaman dan coba lagi.';
     } else {
-        // Handle file upload jika ada
-        if (isset($_FILES['media_file']) && $_FILES['media_file']['error'] !== UPLOAD_ERR_NO_FILE) {
-            $upload_result = upload_file($_FILES['media_file'], 'messages');
-            
-            if ($upload_result['success']) {
-                $file_url = $upload_result['path'];
-            } else {
-                $error = 'Error upload file: ' . $upload_result['message'];
-            }
-        }
-        
-        // Jika tidak ada error upload, simpan ke database
-        if (empty($error)) {
-            try {
-                $stmt = $pdo->prepare("INSERT INTO messages (title, content, delay_days, file_url, is_active) VALUES (?, ?, ?, ?, ?)");
-                $stmt->execute([$title, $content, $delay_days, $file_url, $is_active]);
-                $success = 'Pesan berhasil ditambahkan!';
-                
-                // Reset form
-                $_POST = [];
-            } catch (PDOException $e) {
-                // Jika gagal simpan ke database, hapus file yang sudah diupload
-                if ($file_url) {
-                    delete_file($file_url);
+        $title = trim((string) ($_POST['title'] ?? ''));
+        $content = trim((string) ($_POST['content'] ?? ''));
+        $delay_days = (int) max(0, (int) ($_POST['delay_days'] ?? 0));
+        $is_active = isset($_POST['is_active']) ? 1 : 0;
+        $file_url = null;
+
+        if ($title === '' || $content === '') {
+            $error = 'Title dan content tidak boleh kosong!';
+        } elseif (mb_strlen($title) > 255) {
+            $error = 'Title terlalu panjang. Maksimal 255 karakter.';
+        } elseif ($delay_days > 365) {
+            $error = 'Jeda hari maksimal 365.';
+        } else {
+            if (isset($_FILES['media_file']) && $_FILES['media_file']['error'] !== UPLOAD_ERR_NO_FILE) {
+                $upload_result = upload_file($_FILES['media_file'], 'messages');
+
+                if ($upload_result['success']) {
+                    $file_url = $upload_result['path'];
+                } else {
+                    $error = 'Error upload file: ' . $upload_result['message'];
                 }
-                $error = 'Error: ' . $e->getMessage();
+            }
+
+            if ($error === '') {
+                try {
+                    $stmt = $pdo->prepare('INSERT INTO messages (title, content, delay_days, file_url, is_active) VALUES (:title, :content, :delay_days, :file_url, :is_active)');
+                    $stmt->bindValue(':title', $title, PDO::PARAM_STR);
+                    $stmt->bindValue(':content', $content, PDO::PARAM_STR);
+                    $stmt->bindValue(':delay_days', $delay_days, PDO::PARAM_INT);
+                    $stmt->bindValue(':file_url', $file_url, $file_url === null ? PDO::PARAM_NULL : PDO::PARAM_STR);
+                    $stmt->bindValue(':is_active', $is_active, PDO::PARAM_INT);
+                    $stmt->execute();
+
+                    $success = 'Pesan berhasil ditambahkan!';
+                    $resetForm = true;
+                    $_POST = [];
+                    $formToken = csrf_token('add_message');
+                } catch (PDOException $exception) {
+                    if ($file_url) {
+                        delete_file($file_url);
+                    }
+                    log_security_event('Gagal menambahkan pesan: ' . $exception->getMessage());
+                    $error = 'Terjadi kesalahan saat menyimpan data.';
+                }
             }
         }
     }
 }
+$shouldCheckActive = (!$formSubmitted) || $resetForm || isset($_POST['is_active']);
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -70,32 +84,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <a href="add_message.php" class="nav-active">Tambah Pesan</a>
             <a href="messages.php">Daftar Pesan</a>
             <a href="logs.php">Log Pengiriman</a>
-            <a href="dashboard.php?logout=1" class="logout-btn">Logout</a>
+            <form method="POST" action="logout.php" class="logout-form">
+                <input type="hidden" name="csrf_token" value="<?php echo e($logoutToken); ?>">
+                <button type="submit" class="logout-btn">Logout</button>
+            </form>
         </div>
     </div>
 
     <div class="admin-container">
         <div class="content-section">
             <?php if ($success): ?>
-                <div class="alert alert-success"><?php echo htmlspecialchars($success); ?></div>
+                <div class="alert alert-success"><?php echo e($success); ?></div>
             <?php endif; ?>
             
             <?php if ($error): ?>
-                <div class="alert alert-error"><?php echo htmlspecialchars($error); ?></div>
+                <div class="alert alert-error"><?php echo e($error); ?></div>
             <?php endif; ?>
             
-            <form method="POST" action="" enctype="multipart/form-data">
+            <form method="POST" action="" enctype="multipart/form-data" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="<?php echo e($formToken); ?>">
+
                 <div class="form-group">
                     <label for="title">Judul Pesan <span class="required">*</span></label>
-                    <input type="text" id="title" name="title" required 
-                           value="<?php echo htmlspecialchars($_POST['title'] ?? ''); ?>" 
+                    <input type="text" id="title" name="title" required maxlength="255"
+                           value="<?php echo e($_POST['title'] ?? ''); ?>"
                            placeholder="Contoh: Selamat Datang">
                 </div>
                 
                 <div class="form-group">
                     <label for="content">Isi Pesan <span class="required">*</span></label>
-                    <textarea id="content" name="content" rows="6" required 
-                              placeholder="Masukkan isi pesan yang akan dikirim ke WhatsApp. Gunakan {nama} atau {name} untuk personalisasi."><?php echo htmlspecialchars($_POST['content'] ?? ''); ?></textarea>
+                    <textarea id="content" name="content" rows="6" required
+                              placeholder="Masukkan isi pesan yang akan dikirim ke WhatsApp. Gunakan {nama} atau {name} untuk personalisasi."><?php echo e($_POST['content'] ?? ''); ?></textarea>
                     <small>💡 Tips: Gunakan <strong>{nama}</strong> atau <strong>{name}</strong> untuk menyapa subscriber secara personal</small>
                 </div>
                 
@@ -107,14 +126,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 
                 <div class="form-group">
                     <label for="delay_days">Jeda Hari (setelah pendaftaran) <span class="required">*</span></label>
-                    <input type="number" id="delay_days" name="delay_days" required min="0" 
-                           value="<?php echo htmlspecialchars($_POST['delay_days'] ?? '0'); ?>">
+                    <input type="number" id="delay_days" name="delay_days" required min="0" max="365"
+                           value="<?php echo e($_POST['delay_days'] ?? '0'); ?>">
                     <small>0 = hari pertama, 1 = 1 hari setelah daftar, dst.</small>
                 </div>
                 
                 <div class="form-group">
                     <label>
-                        <input type="checkbox" name="is_active" value="1" checked>
+                        <input type="checkbox" name="is_active" value="1" <?php echo $shouldCheckActive ? 'checked' : ''; ?>>
                         Aktif (pesan akan dikirim)
                     </label>
                 </div>
@@ -124,6 +143,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </form>
         </div>
     </div>
+    <script src="../assets/js/admin.js"></script>
 </body>
 </html>
-

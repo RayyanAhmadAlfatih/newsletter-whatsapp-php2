@@ -14,3 +14,8 @@ Options -Indexes
     Deny from all
 </FilesMatch>
 
+<FilesMatch "^(config\.php|config\.example\.php|\.env|\.env\.example)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+

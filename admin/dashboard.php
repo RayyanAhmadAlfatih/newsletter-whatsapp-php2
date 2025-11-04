@@ -1,52 +1,46 @@
 <?php
-// TEMP: enable error reporting for debugging dashboard blank page
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
-error_reporting(E_ALL);
-ini_set('log_errors', '1');
-ini_set('error_log', __DIR__ . '/error.log');
+declare(strict_types=1);
 
 require_once 'db.php';
+require_once 'helpers.php';
 
-// Cek login
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    header('Location: index.php');
-    exit;
+require_admin_auth();
+
+$stats = [
+    'total_subscribers' => 0,
+    'total_messages' => 0,
+    'total_sent' => 0,
+    'total_pending' => 0,
+    'total_failed' => 0,
+];
+
+try {
+    $countQuery = $pdo->prepare('SELECT COUNT(*) AS total FROM subscribers');
+    $countQuery->execute();
+    $stats['total_subscribers'] = (int) $countQuery->fetchColumn();
+
+    $countQuery = $pdo->prepare('SELECT COUNT(*) AS total FROM messages');
+    $countQuery->execute();
+    $stats['total_messages'] = (int) $countQuery->fetchColumn();
+
+    $statusQuery = $pdo->prepare("SELECT COUNT(*) AS total FROM message_logs WHERE status = :status");
+
+    foreach (['sent' => 'total_sent', 'pending' => 'total_pending', 'failed' => 'total_failed'] as $status => $key) {
+        $statusQuery->execute([':status' => $status]);
+        $stats[$key] = (int) $statusQuery->fetchColumn();
+    }
+
+    $recentStmt = $pdo->prepare('SELECT id, name, email, phone, created_at FROM subscribers ORDER BY created_at DESC LIMIT :limit');
+    $recentStmt->bindValue(':limit', 10, PDO::PARAM_INT);
+    $recentStmt->execute();
+    $recent_subscribers = $recentStmt->fetchAll();
+} catch (PDOException $exception) {
+    log_security_event('Gagal mengambil statistik dashboard: ' . $exception->getMessage());
+    $recent_subscribers = [];
 }
 
-// Logout
-if (isset($_GET['logout'])) {
-    session_destroy();
-    header('Location: index.php');
-    exit;
-}
-
-// Ambil statistik
-$stats = [];
-
-// Total subscribers
-$stmt = $pdo->query("SELECT COUNT(*) as total FROM subscribers");
-$stats['total_subscribers'] = $stmt->fetch()['total'];
-
-// Total messages
-$stmt = $pdo->query("SELECT COUNT(*) as total FROM messages");
-$stats['total_messages'] = $stmt->fetch()['total'];
-
-// Total sent
-$stmt = $pdo->query("SELECT COUNT(*) as total FROM message_logs WHERE status = 'sent'");
-$stats['total_sent'] = $stmt->fetch()['total'];
-
-// Total pending
-$stmt = $pdo->query("SELECT COUNT(*) as total FROM message_logs WHERE status = 'pending'");
-$stats['total_pending'] = $stmt->fetch()['total'];
-
-// Total failed
-$stmt = $pdo->query("SELECT COUNT(*) as total FROM message_logs WHERE status = 'failed'");
-$stats['total_failed'] = $stmt->fetch()['total'];
-
-// Ambil 10 subscriber terbaru
-$stmt = $pdo->query("SELECT * FROM subscribers ORDER BY created_at DESC LIMIT 10");
-$recent_subscribers = $stmt->fetchAll();
+$logoutToken = csrf_token('logout');
+$sendAutoToken = csrf_token('send_auto');
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -65,7 +59,10 @@ $recent_subscribers = $stmt->fetchAll();
             <a href="add_message.php">Tambah Pesan</a>
             <a href="messages.php">Daftar Pesan</a>
             <a href="logs.php">Log Pengiriman</a>
-            <a href="?logout=1" class="logout-btn">Logout</a>
+            <form method="POST" action="logout.php" class="logout-form">
+                <input type="hidden" name="csrf_token" value="<?php echo e($logoutToken); ?>">
+                <button type="submit" class="logout-btn">Logout</button>
+            </form>
         </div>
     </div>
 
@@ -73,23 +70,23 @@ $recent_subscribers = $stmt->fetchAll();
         <div class="stats-grid">
             <div class="stat-card">
                 <h3>Total Subscribers</h3>
-                <p class="stat-number"><?php echo $stats['total_subscribers']; ?></p>
+                <p class="stat-number"><?php echo (int) $stats['total_subscribers']; ?></p>
             </div>
             <div class="stat-card">
                 <h3>Total Pesan</h3>
-                <p class="stat-number"><?php echo $stats['total_messages']; ?></p>
+                <p class="stat-number"><?php echo (int) $stats['total_messages']; ?></p>
             </div>
             <div class="stat-card">
                 <h3>Pesan Terkirim</h3>
-                <p class="stat-number success"><?php echo $stats['total_sent']; ?></p>
+                <p class="stat-number success"><?php echo (int) $stats['total_sent']; ?></p>
             </div>
             <div class="stat-card">
                 <h3>Pending</h3>
-                <p class="stat-number warning"><?php echo $stats['total_pending']; ?></p>
+                <p class="stat-number warning"><?php echo (int) $stats['total_pending']; ?></p>
             </div>
             <div class="stat-card">
                 <h3>Gagal</h3>
-                <p class="stat-number error"><?php echo $stats['total_failed']; ?></p>
+                <p class="stat-number error"><?php echo (int) $stats['total_failed']; ?></p>
             </div>
         </div>
 
@@ -113,11 +110,11 @@ $recent_subscribers = $stmt->fetchAll();
                     <?php else: ?>
                         <?php foreach ($recent_subscribers as $sub): ?>
                             <tr>
-                                <td><?php echo $sub['id']; ?></td>
-                                <td><?php echo htmlspecialchars($sub['name']); ?></td>
-                                <td><?php echo htmlspecialchars($sub['email']); ?></td>
-                                <td><?php echo htmlspecialchars($sub['phone']); ?></td>
-                                <td><?php echo date('d/m/Y H:i', strtotime($sub['created_at'])); ?></td>
+                                <td><?php echo (int) $sub['id']; ?></td>
+                                <td><?php echo e($sub['name']); ?></td>
+                                <td><?php echo e($sub['email']); ?></td>
+                                <td><?php echo e($sub['phone']); ?></td>
+                                <td><?php echo e(date('d/m/Y H:i', strtotime((string) $sub['created_at']))); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     <?php endif; ?>
@@ -129,11 +126,14 @@ $recent_subscribers = $stmt->fetchAll();
             <h2>Quick Actions</h2>
             <div class="action-buttons">
                 <a href="add_message.php" class="btn-primary">➕ Tambah Pesan Baru</a>
-                <a href="send_auto.php?run=1" class="btn-secondary" onclick="return confirm('Jalankan pengiriman otomatis sekarang?')">🚀 Jalankan Pengiriman</a>
+                <form method="POST" action="send_auto.php" class="inline-form" data-confirm="Jalankan pengiriman otomatis sekarang?" data-async="true">
+                    <input type="hidden" name="csrf_token" value="<?php echo e($sendAutoToken); ?>">
+                    <button type="submit" class="btn-secondary">🚀 Jalankan Pengiriman</button>
+                </form>
                 <a href="logs.php" class="btn-secondary">📋 Lihat Log</a>
             </div>
         </div>
     </div>
+    <script src="../assets/js/admin.js"></script>
 </body>
 </html>
-

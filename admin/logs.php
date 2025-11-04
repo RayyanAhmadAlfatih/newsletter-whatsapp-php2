@@ -1,61 +1,78 @@
 <?php
+declare(strict_types=1);
+
 require_once 'db.php';
 require_once 'helpers.php';
 
-// Cek login
-if (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true) {
-    header('Location: index.php');
-    exit;
+require_admin_auth();
+
+$allowedStatuses = ['all', 'pending', 'sent', 'failed'];
+$status_filter = $_GET['status'] ?? 'all';
+if (!in_array($status_filter, $allowedStatuses, true)) {
+    $status_filter = 'all';
 }
 
-// Filter status
-$status_filter = $_GET['status'] ?? 'all';
-
-// Pagination
 $items_per_page = 50;
-$current_page = isset($_GET['page']) ? max(1, intval($_GET['page'])) : 1;
+$current_page = isset($_GET['page']) ? max(1, (int) $_GET['page']) : 1;
 $offset = ($current_page - 1) * $items_per_page;
 
-// Hitung total logs
-$count_sql = "SELECT COUNT(*) as total FROM message_logs ml 
-              JOIN subscribers s ON ml.subscriber_id = s.id
-              JOIN messages m ON ml.message_id = m.id";
+$count_sql = <<<SQL
+SELECT COUNT(*) as total
+FROM message_logs ml
+JOIN subscribers s ON ml.subscriber_id = s.id
+JOIN messages m ON ml.message_id = m.id
+SQL;
+
+try {
+    if ($status_filter !== 'all') {
+        $countQuery = $pdo->prepare($count_sql . ' WHERE ml.status = :status');
+        $countQuery->bindValue(':status', $status_filter, PDO::PARAM_STR);
+    } else {
+        $countQuery = $pdo->prepare($count_sql);
+    }
+    $countQuery->execute();
+    $total_logs = (int) $countQuery->fetchColumn();
+} catch (PDOException $exception) {
+    log_security_event('Gagal menghitung total log: ' . $exception->getMessage());
+    $total_logs = 0;
+}
+
+$total_pages = $total_logs === 0 ? 1 : (int) ceil($total_logs / $items_per_page);
+
+$sql = <<<SQL
+SELECT ml.id,
+       ml.status,
+       ml.sent_at,
+       ml.error_message,
+       s.name AS subscriber_name,
+       s.phone,
+       m.title AS message_title
+FROM message_logs ml
+JOIN subscribers s ON ml.subscriber_id = s.id
+JOIN messages m ON ml.message_id = m.id
+SQL;
 
 if ($status_filter !== 'all') {
-    $count_sql .= " WHERE ml.status = :status";
-    $stmt = $pdo->prepare($count_sql);
-    $stmt->bindValue(':status', $status_filter, PDO::PARAM_STR);
+    $sql .= ' WHERE ml.status = :status';
+}
+
+$sql .= ' ORDER BY ml.id DESC LIMIT :limit OFFSET :offset';
+
+try {
+    $stmt = $pdo->prepare($sql);
+    if ($status_filter !== 'all') {
+        $stmt->bindValue(':status', $status_filter, PDO::PARAM_STR);
+    }
+    $stmt->bindValue(':limit', $items_per_page, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
-} else {
-    $stmt = $pdo->query($count_sql);
+    $logs = $stmt->fetchAll();
+} catch (PDOException $exception) {
+    log_security_event('Gagal mengambil data log: ' . $exception->getMessage());
+    $logs = [];
 }
 
-$total_logs = $stmt->fetch()['total'];
-$total_pages = ceil($total_logs / $items_per_page);
-
-// Query logs dengan join dan pagination
-$sql = "SELECT ml.*, s.name as subscriber_name, s.phone, m.title as message_title 
-        FROM message_logs ml
-        JOIN subscribers s ON ml.subscriber_id = s.id
-        JOIN messages m ON ml.message_id = m.id";
-
-if ($status_filter !== 'all') {
-    $sql .= " WHERE ml.status = :status";
-}
-
-$sql .= " ORDER BY ml.id DESC LIMIT :limit OFFSET :offset";
-
-$stmt = $pdo->prepare($sql);
-
-if ($status_filter !== 'all') {
-    $stmt->bindValue(':status', $status_filter, PDO::PARAM_STR);
-}
-
-$stmt->bindValue(':limit', (int) $items_per_page, PDO::PARAM_INT);
-$stmt->bindValue(':offset', (int) $offset, PDO::PARAM_INT);
-$stmt->execute();
-
-$logs = $stmt->fetchAll();
+$logoutToken = csrf_token('logout');
 ?>
 <!DOCTYPE html>
 <html lang="id">
@@ -74,7 +91,10 @@ $logs = $stmt->fetchAll();
             <a href="add_message.php">Tambah Pesan</a>
             <a href="messages.php">Daftar Pesan</a>
             <a href="logs.php" class="nav-active">Log Pengiriman</a>
-            <a href="dashboard.php?logout=1" class="logout-btn">Logout</a>
+            <form method="POST" action="logout.php" class="logout-form">
+                <input type="hidden" name="csrf_token" value="<?php echo e($logoutToken); ?>">
+                <button type="submit" class="logout-btn">Logout</button>
+            </form>
         </div>
     </div>
 
@@ -88,7 +108,7 @@ $logs = $stmt->fetchAll();
                 <a href="?status=failed" class="filter-btn <?php echo $status_filter === 'failed' ? 'active' : ''; ?>">Gagal</a>
             </div>
             
-            <p><strong>Total:</strong> <?php echo $total_logs; ?> log | Halaman <?php echo $current_page; ?> dari <?php echo $total_pages; ?></p>
+            <p><strong>Total:</strong> <?php echo (int) $total_logs; ?> log | Halaman <?php echo (int) $current_page; ?> dari <?php echo (int) $total_pages; ?></p>
             
             <table class="data-table">
                 <thead>
@@ -110,10 +130,10 @@ $logs = $stmt->fetchAll();
                     <?php else: ?>
                         <?php foreach ($logs as $log): ?>
                             <tr>
-                                <td><?php echo $log['id']; ?></td>
-                                <td><?php echo htmlspecialchars($log['subscriber_name']); ?></td>
-                                <td><?php echo htmlspecialchars($log['phone']); ?></td>
-                                <td><?php echo htmlspecialchars($log['message_title']); ?></td>
+                                <td><?php echo (int) $log['id']; ?></td>
+                                <td><?php echo e($log['subscriber_name']); ?></td>
+                                <td><?php echo e($log['phone']); ?></td>
+                                <td><?php echo e($log['message_title']); ?></td>
                                 <td>
                                     <?php if ($log['status'] === 'sent'): ?>
                                         <span class="badge badge-success">Terkirim</span>
@@ -124,10 +144,10 @@ $logs = $stmt->fetchAll();
                                     <?php endif; ?>
                                 </td>
                                 <td>
-                                    <?php echo $log['sent_at'] ? date('d/m/Y H:i', strtotime($log['sent_at'])) : '-'; ?>
+                                    <?php echo $log['sent_at'] ? e(date('d/m/Y H:i', strtotime((string) $log['sent_at']))) : '-'; ?>
                                 </td>
                                 <td>
-                                    <?php echo $log['error_message'] ? htmlspecialchars($log['error_message']) : '-'; ?>
+                                    <?php echo $log['error_message'] ? e($log['error_message']) : '-'; ?>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -137,10 +157,10 @@ $logs = $stmt->fetchAll();
             
             <?php 
             $base_url = '?status=' . urlencode($status_filter);
-            echo generate_pagination($current_page, $total_pages, $base_url); 
+            echo generate_pagination($current_page, $total_pages, $base_url);
             ?>
         </div>
     </div>
+    <script src="../assets/js/admin.js"></script>
 </body>
 </html>
-

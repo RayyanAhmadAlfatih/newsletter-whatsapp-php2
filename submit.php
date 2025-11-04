@@ -1,107 +1,126 @@
 <?php
-require_once 'admin/db.php';
-require_once 'admin/helpers.php';
+declare(strict_types=1);
 
-// Cek jika form sudah di-submit
+require_once __DIR__ . '/admin/db.php';
+require_once __DIR__ . '/admin/helpers.php';
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     header('Location: index.php');
     exit;
 }
 
-// Ambil data dari form
-$name = trim($_POST['name'] ?? '');
-$email = trim($_POST['email'] ?? '');
-$phone = trim($_POST['phone'] ?? '');
+if (!verify_csrf_token($_POST['csrf_token'] ?? null, 'public_register')) {
+    log_security_event('Percobaan submit dengan CSRF tidak valid dari IP ' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+    $_SESSION['error'] = 'Permintaan tidak valid atau telah kedaluwarsa. Silakan coba lagi.';
+    header('Location: index.php');
+    exit;
+}
 
-// Validasi
+$name = trim((string) ($_POST['name'] ?? ''));
+$email = trim((string) ($_POST['email'] ?? ''));
+$phone = trim((string) ($_POST['phone'] ?? ''));
+
 $errors = [];
 
-if (empty($name) || strlen($name) < 3) {
-    $errors[] = "Nama tidak boleh kosong (minimal 3 karakter)";
+if ($name === '' || mb_strlen($name) < 3) {
+    $errors[] = 'Nama tidak boleh kosong (minimal 3 karakter)';
+} elseif (mb_strlen($name) > 120) {
+    $errors[] = 'Nama maksimal 120 karakter';
 }
 
-if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-    $errors[] = "Email tidak valid";
+if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+    $errors[] = 'Email tidak valid';
+} elseif (mb_strlen($email) > 190) {
+    $errors[] = 'Email terlalu panjang (maksimal 190 karakter)';
 }
 
-// Validasi nomor WhatsApp dengan helper
 $validated_phone = validate_whatsapp_number($phone);
 if (!$validated_phone) {
-    $errors[] = "Nomor WhatsApp tidak valid. Gunakan format 08xx atau 628xx";
+    $errors[] = 'Nomor WhatsApp tidak valid. Gunakan format 08xx atau 628xx';
 }
 
-// Jika ada error, redirect kembali
 if (!empty($errors)) {
     $_SESSION['errors'] = $errors;
     header('Location: index.php');
     exit;
 }
 
-// Gunakan nomor yang sudah divalidasi dan dinormalisasi
 $phone = $validated_phone;
 
 try {
-    // Cek apakah email atau phone sudah terdaftar
-    $stmt = $pdo->prepare("SELECT id FROM subscribers WHERE email = ? OR phone = ?");
-    $stmt->execute([$email, $phone]);
-    
-    if ($stmt->fetch()) {
-        $_SESSION['error'] = "Email atau nomor WhatsApp sudah terdaftar";
+    $existsStmt = $pdo->prepare('SELECT id FROM subscribers WHERE email = :email OR phone = :phone');
+    $existsStmt->execute([
+        ':email' => $email,
+        ':phone' => $phone,
+    ]);
+
+    if ($existsStmt->fetch()) {
+        $_SESSION['error'] = 'Email atau nomor WhatsApp sudah terdaftar';
         header('Location: index.php');
         exit;
     }
 
-    // Insert subscriber baru
-    $stmt = $pdo->prepare("INSERT INTO subscribers (name, email, phone) VALUES (?, ?, ?)");
-    $stmt->execute([$name, $email, $phone]);
-    
-    $subscriberId = $pdo->lastInsertId();
+    $insertSubscriber = $pdo->prepare('INSERT INTO subscribers (name, email, phone) VALUES (:name, :email, :phone)');
+    $insertSubscriber->execute([
+        ':name' => $name,
+        ':email' => $email,
+        ':phone' => $phone,
+    ]);
 
-    // Buat log pesan untuk semua pesan aktif berdasarkan delay_days
-    $stmt = $pdo->prepare("SELECT id, delay_days FROM messages WHERE is_active = 1 ORDER BY delay_days ASC");
-    $stmt->execute();
-    $messages = $stmt->fetchAll();
+    $subscriberId = (int) $pdo->lastInsertId();
+
+    $messagesStmt = $pdo->prepare('SELECT id, delay_days FROM messages WHERE is_active = 1 ORDER BY delay_days ASC');
+    $messagesStmt->execute();
+    $messages = $messagesStmt->fetchAll();
+
+    $logInsertStmt = $pdo->prepare('INSERT INTO message_logs (subscriber_id, message_id, status) VALUES (:subscriber_id, :message_id, :status)');
 
     foreach ($messages as $message) {
-        $stmtLog = $pdo->prepare("INSERT INTO message_logs (subscriber_id, message_id, status) VALUES (?, ?, 'pending')");
-        $stmtLog->execute([$subscriberId, $message['id']]);
+        $logInsertStmt->execute([
+            ':subscriber_id' => $subscriberId,
+            ':message_id' => $message['id'],
+            ':status' => 'pending',
+        ]);
     }
 
-    $_SESSION['success'] = "Pendaftaran berhasil! Kami akan mengirimkan pesan ke WhatsApp Anda.";
+    $_SESSION['success'] = 'Pendaftaran berhasil! Kami akan mengirimkan pesan ke WhatsApp Anda.';
     
-    // Auto-kirim pesan dengan delay 0 hari (hari pertama)
-    $stmt = $pdo->prepare("
-        SELECT ml.id as log_id, ml.subscriber_id, ml.message_id, s.phone, s.name as subscriber_name, m.content, m.file_url
-        FROM message_logs ml
-        JOIN subscribers s ON ml.subscriber_id = s.id
-        JOIN messages m ON ml.message_id = m.id
-        WHERE ml.subscriber_id = ? AND m.delay_days = 0 AND ml.status = 'pending'
-    ");
-    $stmt->execute([$subscriberId]);
-    $messagesToSend = $stmt->fetchAll();
+    $autoSendStmt = $pdo->prepare(
+        'SELECT ml.id as log_id, ml.subscriber_id, ml.message_id, s.phone, s.name as subscriber_name, m.content, m.file_url
+         FROM message_logs ml
+         JOIN subscribers s ON ml.subscriber_id = s.id
+         JOIN messages m ON ml.message_id = m.id
+         WHERE ml.subscriber_id = :subscriber_id AND m.delay_days = 0 AND ml.status = :status'
+    );
+    $autoSendStmt->execute([
+        ':subscriber_id' => $subscriberId,
+        ':status' => 'pending',
+    ]);
+    $messagesToSend = $autoSendStmt->fetchAll();
 
     if (!empty($messagesToSend)) {
-        $fonnteApiKey = defined('FONNTE_API_KEY') ? FONNTE_API_KEY : '';
-        if (empty($fonnteApiKey)) {
+        if (empty(FONNTE_API_KEY)) {
             $missingKeyMessage = 'Fonnte API key belum dikonfigurasi';
-            $stmtUpd = $pdo->prepare("UPDATE message_logs SET status = 'failed', error_message = ? WHERE id = ?");
+            $updateStmt = $pdo->prepare('UPDATE message_logs SET status = :status, error_message = :error WHERE id = :id');
             foreach ($messagesToSend as $msg) {
-                $stmtUpd->execute([$missingKeyMessage, $msg['log_id']]);
+                $updateStmt->execute([
+                    ':status' => 'failed',
+                    ':error' => $missingKeyMessage,
+                    ':id' => $msg['log_id'],
+                ]);
             }
         } else {
-            $stmtUpd = $pdo->prepare("UPDATE message_logs SET status = ?, sent_at = NOW(), error_message = ? WHERE id = ?");
+            $updateStmt = $pdo->prepare('UPDATE message_logs SET status = :status, sent_at = NOW(), error_message = :error WHERE id = :id');
             foreach ($messagesToSend as $msg) {
                 $content = str_replace(['{nama}', '{name}'], $msg['subscriber_name'], $msg['content']);
                 $phoneWA = normalize_phone($msg['phone']);
                 
-                // Build post fields
                 $postfields = [
                     'target' => $phoneWA,
                     'message' => $content,
-                    'countryCode' => '62'
+                    'countryCode' => '62',
                 ];
                 
-                // Tambahkan URL media jika ada
                 if (!empty($msg['file_url'])) {
                     $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
                     $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
@@ -116,47 +135,45 @@ try {
                     CURLOPT_RETURNTRANSFER => true,
                     CURLOPT_ENCODING => '',
                     CURLOPT_MAXREDIRS => 10,
-                    CURLOPT_TIMEOUT => 0,
+                    CURLOPT_TIMEOUT => 30,
                     CURLOPT_FOLLOWLOCATION => true,
                     CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
                     CURLOPT_CUSTOMREQUEST => 'POST',
                     CURLOPT_POSTFIELDS => $postfields,
-                    CURLOPT_HTTPHEADER => ['Authorization: ' . $fonnteApiKey],
+                    CURLOPT_HTTPHEADER => ['Authorization: ' . FONNTE_API_KEY],
                 ]);
                 $response = curl_exec($ch);
                 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                $curlError = curl_error($ch);
                 curl_close($ch);
                 
-                // Update log
-                $result = json_decode($response, true);
+                $result = json_decode((string) $response, true);
                 $statusFlag = null;
                 if (is_array($result)) {
                     if (isset($result['status'])) { $statusFlag = $result['status']; }
                     elseif (isset($result['message'])) { $statusFlag = $result['message']; }
                 }
                 
-                $isSuccess = ($httpCode === 200) && (
-                    $statusFlag === 'success' || $statusFlag === true || $statusFlag === 'ok'
-                );
+                $isSuccess = ($httpCode === 200) && in_array($statusFlag, ['success', true, 'true', 'ok'], true);
+                $errorMsg = $isSuccess ? null : (is_array($result) ? json_encode($result) : ($curlError ?: 'HTTP ' . $httpCode));
+                if (!$isSuccess && $errorMsg !== null) {
+                    $errorMsg = substr((string) $errorMsg, 0, 255);
+                }
                 
-                $errorMsg = $isSuccess ? null : (is_array($result) ? json_encode($result) : 'HTTP ' . $httpCode);
-                
-                $stmtUpd->execute([
-                    $isSuccess ? 'sent' : 'failed',
-                    $errorMsg,
-                    $msg['log_id']
+                $updateStmt->execute([
+                    ':status' => $isSuccess ? 'sent' : 'failed',
+                    ':error' => $errorMsg,
+                    ':id' => $msg['log_id'],
                 ]);
                 
-                usleep(200000); // 0.2s delay antar pesan
+                usleep(200000);
             }
         }
     }
-    
-} catch (PDOException $e) {
-    $_SESSION['error'] = "Terjadi kesalahan: " . $e->getMessage();
+} catch (PDOException $exception) {
+    log_security_event('Kesalahan database saat pendaftaran: ' . $exception->getMessage());
+    $_SESSION['error'] = 'Terjadi kesalahan internal. Silakan coba lagi nanti.';
 }
 
 header('Location: index.php');
 exit;
-?>
-

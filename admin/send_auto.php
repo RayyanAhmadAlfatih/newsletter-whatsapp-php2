@@ -1,44 +1,49 @@
 <?php
-require_once 'db.php';
+declare(strict_types=1);
 
-// Cek login (optional, bisa juga dijalankan via cron tanpa login)
-// Jika diakses dari browser, perlu login
-if (php_sapi_name() !== 'cli' && (!isset($_SESSION['admin_logged_in']) || $_SESSION['admin_logged_in'] !== true)) {
-    header('Location: index.php');
-    exit;
+require_once 'db.php';
+require_once 'helpers.php';
+
+$isCli = PHP_SAPI === 'cli';
+
+if (!$isCli) {
+    require_admin_auth();
+
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        http_response_code(405);
+        exit('Metode tidak diizinkan.');
+    }
+
+    if (!verify_csrf_token($_POST['csrf_token'] ?? null, 'send_auto')) {
+        log_security_event('CSRF tidak valid untuk send_auto dari IP ' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
+        http_response_code(400);
+        exit('Permintaan tidak valid atau kedaluwarsa.');
+    }
 }
 
 /**
  * Fungsi untuk mengirim pesan WhatsApp via Fonnte API
  * Support teks + media (gambar, video, pdf)
  */
-function sendWhatsAppMessage($phone, $message, $apiKey, $fileUrl = null) {
+function sendWhatsAppMessage(string $phone, string $message, string $apiKey, ?string $fileUrl = null): array
+{
     $url = FONNTE_API_URL;
-    // Fonnte expects multipart form fields, not raw JSON
     $postfields = [
         'target' => $phone,
         'message' => $message,
-        'countryCode' => '62', // optional, keep consistent
+        'countryCode' => '62',
     ];
     
-    // Jika ada file media, tambahkan URL-nya
     if (!empty($fileUrl)) {
-        // Konversi relative path ke absolute URL
-        if (!preg_match('/^https?:\/\//', $fileUrl)) {
-            // Get base URL dari server
+        if (!preg_match('/^https?:\/\//i', $fileUrl)) {
             $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
             $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
             $baseUrl = $protocol . '://' . $host;
-            
-            // Jika dijalankan via CLI (cron), gunakan config manual atau skip URL conversion
-            if (php_sapi_name() === 'cli') {
-                // Anda bisa set BASE_URL di db.php atau skip jika file sudah absolute
-                $baseUrl = defined('BASE_URL') ? BASE_URL : 'http://localhost';
+            if (PHP_SAPI === 'cli' && defined('BASE_URL')) {
+                $baseUrl = BASE_URL;
             }
-            
             $fileUrl = rtrim($baseUrl, '/') . '/' . ltrim($fileUrl, '/');
         }
-        
         $postfields['url'] = $fileUrl;
     }
 
@@ -48,7 +53,7 @@ function sendWhatsAppMessage($phone, $message, $apiKey, $fileUrl = null) {
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_ENCODING => '',
         CURLOPT_MAXREDIRS => 10,
-        CURLOPT_TIMEOUT => 0,
+        CURLOPT_TIMEOUT => 30,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
         CURLOPT_CUSTOMREQUEST => 'POST',
@@ -63,42 +68,47 @@ function sendWhatsAppMessage($phone, $message, $apiKey, $fileUrl = null) {
     $err = curl_error($ch);
     curl_close($ch);
 
-    $result = json_decode($response, true);
+    $result = json_decode((string) $response, true);
 
-    // Fonnte variations observed: {status:true}, {status:'success'}, {message:'success'}, or detail.status
     $statusFlag = null;
     if (is_array($result)) {
-        if (isset($result['status'])) { $statusFlag = $result['status']; }
-        elseif (isset($result['message'])) { $statusFlag = $result['message']; }
-        elseif (isset($result['detail']['status'])) { $statusFlag = $result['detail']['status']; }
+        if (isset($result['status'])) {
+            $statusFlag = $result['status'];
+        } elseif (isset($result['message'])) {
+            $statusFlag = $result['message'];
+        } elseif (isset($result['detail']['status'])) {
+            $statusFlag = $result['detail']['status'];
+        }
     }
-    $isSuccess = ($httpCode === 200) && (
-        $statusFlag === true ||
-        $statusFlag === 'true' ||
-        $statusFlag === 'success' ||
-        $statusFlag === 'ok'
-    );
+
+    $isSuccess = ($httpCode === 200) && in_array($statusFlag, [true, 'true', 'success', 'ok'], true);
 
     return [
         'success' => $isSuccess,
-        'response' => $result ?: $response,
+        'response' => $result ?? $response,
         'http_code' => $httpCode,
         'error' => $err,
     ];
 }
 
-// Ambil semua log dengan status pending
-$stmt = $pdo->query("
-    SELECT ml.*, s.phone, s.name as subscriber_name, s.created_at as subscriber_created_at,
-           m.content, m.title, m.delay_days, m.file_url
-    FROM message_logs ml
-    JOIN subscribers s ON ml.subscriber_id = s.id
-    JOIN messages m ON ml.message_id = m.id
-    WHERE ml.status = 'pending'
-    ORDER BY ml.id ASC
-");
-
-$pendingLogs = $stmt->fetchAll();
+try {
+    $stmt = $pdo->prepare(
+        'SELECT ml.id, ml.status, ml.sent_at, ml.error_message, 
+                s.phone, s.name as subscriber_name, s.created_at as subscriber_created_at,
+                m.content, m.title, m.delay_days, m.file_url
+         FROM message_logs ml
+         JOIN subscribers s ON ml.subscriber_id = s.id
+         JOIN messages m ON ml.message_id = m.id
+         WHERE ml.status = :status
+         ORDER BY ml.id ASC'
+    );
+    $stmt->bindValue(':status', 'pending', PDO::PARAM_STR);
+    $stmt->execute();
+    $pendingLogs = $stmt->fetchAll();
+} catch (PDOException $exception) {
+    log_security_event('Gagal mengambil data pending logs: ' . $exception->getMessage());
+    $pendingLogs = [];
+}
 
 $results = [
     'processed' => 0,
@@ -112,25 +122,23 @@ $results = [
 $missingApiKey = empty(FONNTE_API_KEY);
 $missingApiKeyMessage = 'Fonnte API key belum dikonfigurasi';
 $missingApiKeyStmt = null;
-if ($missingApiKey) {
+if ($missingApiKey && $pdo instanceof PDO) {
     $missingApiKeyStmt = $pdo->prepare(
-        "UPDATE message_logs SET status = 'failed', error_message = ? WHERE id = ?"
+        'UPDATE message_logs SET status = :status, error_message = :error WHERE id = :id'
     );
 }
 
 foreach ($pendingLogs as $log) {
     $results['processed']++;
     
-    // Hitung tanggal target pengiriman (tanggal daftar + delay days)
-    $subscriberCreatedAt = new DateTime($log['subscriber_created_at']);
-    $targetDate = clone $subscriberCreatedAt;
-    $targetDate->modify('+' . $log['delay_days'] . ' days');
-    $targetDate->setTime(0, 0, 0); // Set ke awal hari
+    $subscriberCreatedAt = new DateTime((string) $log['subscriber_created_at']);
+    $targetDate = (clone $subscriberCreatedAt);
+    $targetDate->modify('+' . (int) $log['delay_days'] . ' days');
+    $targetDate->setTime(0, 0, 0);
     
     $today = new DateTime();
     $today->setTime(0, 0, 0);
     
-    // Jika belum waktunya, skip
     if ($today < $targetDate) {
         $results['skipped']++;
         $results['details'][] = [
@@ -138,74 +146,82 @@ foreach ($pendingLogs as $log) {
             'phone' => $log['phone'],
             'message' => $log['title'],
             'status' => 'skipped',
-            'reason' => 'Belum waktunya (target: ' . $targetDate->format('Y-m-d') . ')'
+            'reason' => 'Belum waktunya (target: ' . $targetDate->format('Y-m-d') . ')',
         ];
         continue;
     }
 
     if ($missingApiKey && $missingApiKeyStmt) {
-        $missingApiKeyStmt->execute([$missingApiKeyMessage, $log['id']]);
+        $missingApiKeyStmt->execute([
+            ':status' => 'failed',
+            ':error' => $missingApiKeyMessage,
+            ':id' => $log['id'],
+        ]);
         $results['failed']++;
         $results['details'][] = [
             'subscriber' => $log['subscriber_name'],
             'phone' => $log['phone'],
             'message' => $log['title'],
             'status' => 'failed',
-            'error' => $missingApiKeyMessage
+            'error' => $missingApiKeyMessage,
         ];
         continue;
     }
     
-    // Kirim pesan
     $phone = $log['phone'];
-    // Pastikan nomor dimulai dengan 62 (kode negara Indonesia untuk Fonnte)
     if (substr($phone, 0, 1) === '0') {
         $phone = '62' . substr($phone, 1);
     } elseif (substr($phone, 0, 2) !== '62') {
-        $phone = '62' . $phone;
+        $phone = '62' . preg_replace('/^\+?/', '', $phone);
     }
     
-    // Format pesan dengan personalisasi
     $messageContent = str_replace(
         ['{nama}', '{name}'],
         $log['subscriber_name'],
         $log['content']
     );
     
-    // Kirim pesan dengan media jika ada
     $sendResult = sendWhatsAppMessage($phone, $messageContent, FONNTE_API_KEY, $log['file_url']);
     
-    // Update log
     if ($sendResult['success']) {
-        $stmt = $pdo->prepare("
-            UPDATE message_logs 
-            SET status = 'sent', sent_at = NOW() 
-            WHERE id = ?
-        ");
-        $stmt->execute([$log['id']]);
+        try {
+            $updateStmt = $pdo->prepare('UPDATE message_logs SET status = :status, sent_at = NOW(), error_message = NULL WHERE id = :id');
+            $updateStmt->execute([
+                ':status' => 'sent',
+                ':id' => $log['id'],
+            ]);
+        } catch (PDOException $exception) {
+            log_security_event('Gagal memperbarui status log setelah sukses kirim: ' . $exception->getMessage());
+        }
         
         $results['sent']++;
         $results['details'][] = [
             'subscriber' => $log['subscriber_name'],
             'phone' => $log['phone'],
             'message' => $log['title'],
-            'status' => 'sent'
+            'status' => 'sent',
         ];
     } else {
         $raw = $sendResult['response'];
-        $msgFromApi = is_array($raw) ? ($raw['message'] ?? $raw['detail']['message'] ?? null) : null;
+        $msgFromApi = null;
+        if (is_array($raw)) {
+            $msgFromApi = $raw['message'] ?? ($raw['detail']['message'] ?? null);
+        }
         $errorMsg = $msgFromApi ?: ($sendResult['error'] ?: ('HTTP ' . $sendResult['http_code']));
-        // Simpan ringkas + potongan respons untuk debug
-        $errorMsg = substr((string)$errorMsg, 0, 255);
+        $errorMsg = substr((string) $errorMsg, 0, 255);
         $responseSnippet = is_string($raw) ? $raw : json_encode($raw, JSON_UNESCAPED_UNICODE);
         $responseSnippet = $responseSnippet ? substr($responseSnippet, 0, 500) : '';
         
-        $stmt = $pdo->prepare("
-            UPDATE message_logs 
-            SET status = 'failed', error_message = CONCAT(IFNULL(error_message,''), ' | ', ?) 
-            WHERE id = ?
-        ");
-        $stmt->execute([$errorMsg . ($responseSnippet ? (' :: ' . $responseSnippet) : ''), $log['id']]);
+        try {
+            $updateStmt = $pdo->prepare('UPDATE message_logs SET status = :status, error_message = :error WHERE id = :id');
+            $updateStmt->execute([
+                ':status' => 'failed',
+                ':error' => $errorMsg . ($responseSnippet ? (' :: ' . $responseSnippet) : ''),
+                ':id' => $log['id'],
+            ]);
+        } catch (PDOException $exception) {
+            log_security_event('Gagal memperbarui status log setelah gagal kirim: ' . $exception->getMessage());
+        }
         
         $results['failed']++;
         $results['details'][] = [
@@ -213,21 +229,18 @@ foreach ($pendingLogs as $log) {
             'phone' => $log['phone'],
             'message' => $log['title'],
             'status' => 'failed',
-            'error' => $errorMsg
+            'error' => $errorMsg,
         ];
     }
     
-    // Delay sedikit untuk menghindari rate limit
-    usleep(500000); // 0.5 detik
+    usleep(500000);
 }
 
 if ($missingApiKey) {
     $results['message'] = $missingApiKeyMessage;
 }
 
-// Output hasil (untuk browser atau CLI)
-if (php_sapi_name() === 'cli') {
-    // CLI mode (untuk cron job)
+if ($isCli) {
     if (!empty($results['message'])) {
         echo $results['message'] . "\n";
     }
@@ -236,10 +249,8 @@ if (php_sapi_name() === 'cli') {
     echo "- Terkirim: {$results['sent']}\n";
     echo "- Gagal: {$results['failed']}\n";
     echo "- Dilewati: {$results['skipped']}\n";
-} else {
-    // Browser mode
-    header('Content-Type: application/json');
-    echo json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+    exit;
 }
-?>
 
+header('Content-Type: application/json');
+echo json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);

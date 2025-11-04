@@ -133,8 +133,25 @@ body::before {
     display: flex;
     gap: 20px;
     flex-wrap: wrap;
+    align-items: center;
     position: relative;
     z-index: 2;
+}
+
+.logout-form {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+}
+
+.inline-form {
+    display: inline-flex;
+    align-items: center;
+}
+
+.inline-form button,
+.logout-form button {
+    font: inherit;
 }
 
 .admin-nav a {
@@ -163,9 +180,17 @@ body::before {
 }
 
 .logout-btn {
+    display: inline-block;
+    padding: 12px 20px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
     background: rgba(220, 53, 69, 0.8);
+    text-decoration: none;
+    cursor: pointer;
     margin-left: auto;
     transition: all 0.3s ease;
+    backdrop-filter: blur(10px);
 }
 
 .logout-btn:hover {
@@ -360,7 +385,8 @@ body::before {
 
 /* Buttons */
 .btn-primary,
-.btn-secondary {
+.btn-secondary,
+.btn-danger {
     display: inline-block;
     padding: 15px 30px;
     border: none;
@@ -390,14 +416,22 @@ body::before {
     box-shadow: 0 8px 25px rgba(108, 117, 125, 0.3);
 }
 
+.btn-danger {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+    color: white;
+    box-shadow: 0 8px 25px rgba(231, 76, 60, 0.35);
+}
+
 .btn-primary:hover,
-.btn-secondary:hover {
+.btn-secondary:hover,
+.btn-danger:hover {
     transform: translateY(-3px);
     box-shadow: 0 15px 35px rgba(0, 0, 0, 0.2);
 }
 
 .btn-primary:active,
-.btn-secondary:active {
+.btn-secondary:active,
+.btn-danger:active {
     transform: translateY(-1px);
 }
 
@@ -444,6 +478,39 @@ body::before {
 
 .text-center {
     text-align: center;
+    font-weight: 500;
+}
+
+.action-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+}
+
+.action-cell .inline-form {
+    margin: 0;
+}
+
+.current-file-preview {
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.85);
+    border-radius: 10px;
+    border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.current-media-thumb {
+    max-width: 200px;
+    max-height: 200px;
+    border-radius: 8px;
+    display: block;
+    margin-bottom: 10px;
+}
+
+.checkbox-inline {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-weight: 500;
 }
 
