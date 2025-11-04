@@ -3,6 +3,130 @@
  * Helper functions untuk validasi, sanitasi, dan utilitas umum
  */
 
+if (!function_exists('is_admin_logged_in')) {
+    function is_admin_logged_in(): bool
+    {
+        return isset($_SESSION['admin_logged_in']) && $_SESSION['admin_logged_in'] === true;
+    }
+}
+
+if (!function_exists('require_admin_auth')) {
+    function require_admin_auth(): void
+    {
+        if (!is_admin_logged_in()) {
+            header('Location: index.php');
+            exit;
+        }
+    }
+}
+
+if (!function_exists('logout_admin')) {
+    function logout_admin(): void
+    {
+        if (session_status() !== PHP_SESSION_ACTIVE) {
+            return;
+        }
+
+        app_reset_session(false);
+
+        $params = session_get_cookie_params();
+        setcookie(
+            session_name(),
+            '',
+            time() - 3600,
+            $params['path'] ?? '/',
+            $params['domain'] ?? '',
+            $params['secure'] ?? false,
+            $params['httponly'] ?? true
+        );
+
+        session_destroy();
+    }
+}
+
+if (!function_exists('log_security_event')) {
+    function log_security_event(string $message): void
+    {
+        error_log('[SECURITY] ' . $message);
+    }
+}
+
+if (!defined('CSRF_TOKEN_TTL')) {
+    define('CSRF_TOKEN_TTL', 1800);
+}
+
+if (!function_exists('csrf_token')) {
+    function csrf_token(string $key = 'default'): string
+    {
+        if (!isset($_SESSION['_csrf_tokens']) || !is_array($_SESSION['_csrf_tokens'])) {
+            $_SESSION['_csrf_tokens'] = [];
+        }
+
+        $shouldRefresh = true;
+        if (isset($_SESSION['_csrf_tokens'][$key]['value'], $_SESSION['_csrf_tokens'][$key]['generated_at'])) {
+            $generatedAt = (int) $_SESSION['_csrf_tokens'][$key]['generated_at'];
+            if ($generatedAt + CSRF_TOKEN_TTL > time()) {
+                $shouldRefresh = false;
+            }
+        }
+
+        if ($shouldRefresh) {
+            try {
+                $token = bin2hex(random_bytes(32));
+            } catch (Throwable $throwable) {
+                $token = bin2hex(openssl_random_pseudo_bytes(32));
+            }
+
+            $_SESSION['_csrf_tokens'][$key] = [
+                'value' => $token,
+                'generated_at' => time(),
+            ];
+        }
+
+        return $_SESSION['_csrf_tokens'][$key]['value'];
+    }
+}
+
+if (!function_exists('verify_csrf_token')) {
+    function verify_csrf_token(?string $token, string $key = 'default'): bool
+    {
+        if ($token === null || $token === '') {
+            return false;
+        }
+
+        if (!isset($_SESSION['_csrf_tokens'][$key]['value'], $_SESSION['_csrf_tokens'][$key]['generated_at'])) {
+            return false;
+        }
+
+        $storedToken = (string) $_SESSION['_csrf_tokens'][$key]['value'];
+        $generatedAt = (int) $_SESSION['_csrf_tokens'][$key]['generated_at'];
+
+        if ($generatedAt + CSRF_TOKEN_TTL <= time()) {
+            unset($_SESSION['_csrf_tokens'][$key]);
+            return false;
+        }
+
+        $isValid = hash_equals($storedToken, (string) $token);
+
+        if ($isValid) {
+            unset($_SESSION['_csrf_tokens'][$key]);
+        }
+
+        return $isValid;
+    }
+}
+
+if (!function_exists('validate_csrf_or_redirect')) {
+    function validate_csrf_or_redirect(?string $token, string $key, string $redirectUrl = 'index.php'): void
+    {
+        if (!verify_csrf_token($token, $key)) {
+            $_SESSION['error'] = 'Permintaan tidak valid atau telah kedaluwarsa. Silakan coba lagi.';
+            header('Location: ' . $redirectUrl);
+            exit;
+        }
+    }
+}
+
 /**
  * Sanitasi input untuk mencegah XSS
  */
@@ -114,7 +238,7 @@ function validate_file_upload($file, $allowed_types = [], $max_size = 10485760) 
     $mime_type = finfo_file($finfo, $file['tmp_name']);
     finfo_close($finfo);
     
-    if (!in_array($mime_type, $allowed_types)) {
+    if (!in_array($mime_type, $allowed_types, true)) {
         return [
             'success' => false,
             'message' => 'Tipe file tidak diizinkan. Hanya gambar, video, dan PDF yang diperbolehkan.'
@@ -123,7 +247,7 @@ function validate_file_upload($file, $allowed_types = [], $max_size = 10485760) 
     
     // Cek ekstensi file
     $file_extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-    if (!in_array($file_extension, $allowed_extensions)) {
+    if (!in_array($file_extension, $allowed_extensions, true)) {
         return [
             'success' => false,
             'message' => 'Ekstensi file tidak diizinkan'
@@ -131,7 +255,7 @@ function validate_file_upload($file, $allowed_types = [], $max_size = 10485760) 
     }
     
     // Generate nama file yang aman
-    $safe_filename = uniqid() . '_' . time() . '.' . $file_extension;
+    $safe_filename = uniqid('', true) . '_' . time() . '.' . $file_extension;
     
     return [
         'success' => true,
@@ -183,12 +307,12 @@ function upload_file($file, $subfolder = '') {
             'path' => $relative_path,
             'full_path' => $destination
         ];
-    } else {
-        return [
-            'success' => false,
-            'message' => 'Gagal memindahkan file'
-        ];
     }
+
+    return [
+        'success' => false,
+        'message' => 'Gagal memindahkan file'
+    ];
 }
 
 /**
@@ -216,20 +340,33 @@ function generate_pagination($current_page, $total_pages, $base_url) {
         return '';
     }
     
+    $buildUrl = static function (string $baseUrl, int $page): string {
+        if ($baseUrl === '') {
+            return '?page=' . $page;
+        }
+
+        $separator = '?';
+        if (strpos($baseUrl, '?') !== false) {
+            $separator = substr($baseUrl, -1) === '?' ? '' : '&';
+        } elseif (strpos($baseUrl, '#') !== false) {
+            $separator = '&';
+        }
+
+        return $baseUrl . ($separator === '' ? '' : $separator) . 'page=' . $page;
+    };
+    
     $html = '<div class="pagination">';
     
-    // Previous button
     if ($current_page > 1) {
         $prev_page = $current_page - 1;
-        $html .= '<a href="' . $base_url . '&page=' . $prev_page . '" class="page-link">&laquo; Prev</a>';
+        $html .= '<a href="' . $buildUrl($base_url, $prev_page) . '" class="page-link">&laquo; Prev</a>';
     }
     
-    // Page numbers
     $start = max(1, $current_page - 2);
     $end = min($total_pages, $current_page + 2);
     
     if ($start > 1) {
-        $html .= '<a href="' . $base_url . '&page=1" class="page-link">1</a>';
+        $html .= '<a href="' . $buildUrl($base_url, 1) . '" class="page-link">1</a>';
         if ($start > 2) {
             $html .= '<span class="page-dots">...</span>';
         }
@@ -237,20 +374,19 @@ function generate_pagination($current_page, $total_pages, $base_url) {
     
     for ($i = $start; $i <= $end; $i++) {
         $active = $i === $current_page ? 'active' : '';
-        $html .= '<a href="' . $base_url . '&page=' . $i . '" class="page-link ' . $active . '">' . $i . '</a>';
+        $html .= '<a href="' . $buildUrl($base_url, $i) . '" class="page-link ' . $active . '">' . $i . '</a>';
     }
     
     if ($end < $total_pages) {
         if ($end < $total_pages - 1) {
             $html .= '<span class="page-dots">...</span>';
         }
-        $html .= '<a href="' . $base_url . '&page=' . $total_pages . '" class="page-link">' . $total_pages . '</a>';
+        $html .= '<a href="' . $buildUrl($base_url, $total_pages) . '" class="page-link">' . $total_pages . '</a>';
     }
     
-    // Next button
     if ($current_page < $total_pages) {
         $next_page = $current_page + 1;
-        $html .= '<a href="' . $base_url . '&page=' . $next_page . '" class="page-link">Next &raquo;</a>';
+        $html .= '<a href="' . $buildUrl($base_url, $next_page) . '" class="page-link">Next &raquo;</a>';
     }
     
     $html .= '</div>';

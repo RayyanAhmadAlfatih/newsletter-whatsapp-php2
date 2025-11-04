@@ -1,4 +1,15 @@
-<?php session_start(); ?>
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/admin/db.php';
+require_once __DIR__ . '/admin/helpers.php';
+
+$registerToken = csrf_token('public_register');
+$flashSuccess = $_SESSION['success'] ?? '';
+$flashError = $_SESSION['error'] ?? '';
+$flashErrors = $_SESSION['errors'] ?? [];
+unset($_SESSION['success'], $_SESSION['error'], $_SESSION['errors']);
+?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -15,15 +26,17 @@
         </div>
 
         <div class="form-container">
-            <form id="registerForm" action="submit.php" method="POST">
+            <form id="registerForm" action="submit.php" method="POST" autocomplete="off">
+                <input type="hidden" name="csrf_token" value="<?php echo e($registerToken); ?>">
+
                 <div class="form-group">
                     <label for="name">Nama Lengkap <span class="required">*</span></label>
-                    <input type="text" id="name" name="name" required placeholder="Masukkan nama Anda">
+                    <input type="text" id="name" name="name" required placeholder="Masukkan nama Anda" maxlength="120">
                 </div>
 
                 <div class="form-group">
                     <label for="email">Email <span class="required">*</span></label>
-                    <input type="email" id="email" name="email" required placeholder="contoh@email.com">
+                    <input type="email" id="email" name="email" required placeholder="contoh@email.com" maxlength="190">
                 </div>
 
                 <div class="form-group">
@@ -53,20 +66,19 @@ Rayyan bukan hanya belajar coding, tapi <strong>membangun sistem, ide, dan visi<
                 <button type="submit" class="btn-submit">Daftar Sekarang</button>
             </form>
 
-            <?php if (isset($_SESSION['success'])): ?>
-                <div class="message success show"><?php echo htmlspecialchars($_SESSION['success']); unset($_SESSION['success']); ?></div>
+            <?php if ($flashSuccess): ?>
+                <div class="message success show"><?php echo e($flashSuccess); ?></div>
             <?php endif; ?>
-            <?php if (isset($_SESSION['error'])): ?>
-                <div class="message error show"><?php echo htmlspecialchars($_SESSION['error']); unset($_SESSION['error']); ?></div>
+            <?php if ($flashError): ?>
+                <div class="message error show"><?php echo e($flashError); ?></div>
             <?php endif; ?>
-            <?php if (isset($_SESSION['errors']) && !empty($_SESSION['errors'])): ?>
+            <?php if (!empty($flashErrors)): ?>
                 <div class="message error show">
                     <ul>
-                        <?php foreach ($_SESSION['errors'] as $err): ?>
-                            <li><?php echo htmlspecialchars($err); ?></li>
+                        <?php foreach ($flashErrors as $err): ?>
+                            <li><?php echo e($err); ?></li>
                         <?php endforeach; ?>
                     </ul>
-                    <?php unset($_SESSION['errors']); ?>
                 </div>
             <?php endif; ?>
             <div id="message" class="message"></div>
@@ -80,4 +92,3 @@ Rayyan bukan hanya belajar coding, tapi <strong>membangun sistem, ide, dan visi<
     <script src="assets/js/script.js"></script>
 </body>
 </html>
-

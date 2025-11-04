@@ -1,11 +1,9 @@
-# Prevent PHP execution in uploads folder
-<FilesMatch "\.(?i:php|php3|php4|php5|phtml)$">
-    Order Deny,Allow
+# Disable script execution within uploads directory
+<FilesMatch "\.(php|php[0-9]?|phtml|phar)$">
+    Order allow,deny
     Deny from all
 </FilesMatch>
 
-# Allow access to media files only
-<FilesMatch "\.(?i:jpg|jpeg|png|gif|webp|mp4|avi|mpeg|mov|pdf)$">
-    Order Allow,Deny
-    Allow from all
-</FilesMatch>
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
